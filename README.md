@@ -68,6 +68,14 @@ uv run oneco --version
 oneco create ~/my-company --name "My Company"
 ```
 
+If your TraeCode account does not offer the default model, choose one it does provide:
+
+```bash
+oneco create ~/my-company --name "My Company" --model "MODEL_NAME"
+```
+
+OneCo will report an unavailable model instead of silently choosing another one.
+
 This checks the configured Trae model, installs the bundled OneCo plugin locally, creates the company repository, initializes Git, and adds `OneCo — My Company.app` to `~/Applications`.
 
 Check the setup:

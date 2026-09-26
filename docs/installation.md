@@ -35,6 +35,14 @@ The shortest complete path is:
 oneco create ~/my-company --name "My Company"
 ```
 
+If the default model is unavailable in your TraeCode account, pass an available model explicitly:
+
+```bash
+oneco create ~/my-company --name "My Company" --model "MODEL_NAME"
+```
+
+OneCo never silently substitutes a different model.
+
 With no arguments, the wizard asks only for the name and folder:
 
 ```bash

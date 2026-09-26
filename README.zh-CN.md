@@ -68,6 +68,14 @@ uv run oneco --version
 oneco create ~/my-company --name "My Company"
 ```
 
+如果你的 TraeCode 账号不能使用默认模型，请明确指定账号中已有的模型：
+
+```bash
+oneco create ~/my-company --name "My Company" --model "MODEL_NAME"
+```
+
+模型不可用时，OneCo 会直接报错，不会悄悄替换成其他模型。
+
 这条命令会检查配置的 Trae 模型、在本地安装仓库内置的 OneCo 插件、创建公司仓库、初始化 Git，并在 `~/Applications` 中添加 `OneCo — My Company.app`。
 
 检查环境：
