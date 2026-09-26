@@ -1,0 +1,4 @@
+interface:
+  display_name: "OneCo Protocol"
+  short_description: "Shared authority, evidence, and operating rules"
+  default_prompt: "Use $oneco-protocol to orient this session and choose the next authorized action."

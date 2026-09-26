@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OneCo Bridge</title>
+  <style>
+    :root { color-scheme:dark; --ink:#171713; --panel:#22221d; --paper:#e9e5d9; --muted:#999689; --line:#424138; --signal:#e6ff4a; --warning:#ff935c; --blue:#8cb9ff; --ok:#79d49a; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; background:var(--ink); color:var(--paper); }
+    body { font-family:"Avenir Next Condensed","Helvetica Neue",sans-serif; background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px); background-size:28px 28px; overflow:hidden; }
+    button { font:inherit; }
+    .shell { height:100vh; display:grid; grid-template-rows:auto 1fr; }
+    .masthead { display:grid; grid-template-columns:1.3fr .7fr; gap:32px; align-items:end; padding:28px 34px 22px; border-bottom:1px solid var(--line); background:rgba(23,23,19,.94); backdrop-filter:blur(16px); }
+    .eyebrow { color:var(--signal); letter-spacing:.18em; text-transform:uppercase; font-size:11px; }
+    h1 { margin:6px 0 0; font:600 42px/1 "Iowan Old Style",Georgia,serif; letter-spacing:-.035em; }
+    .root { color:var(--muted); font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; text-align:right; overflow:hidden; text-overflow:ellipsis; }
+    .grid { min-height:0; display:grid; grid-template-columns:250px minmax(480px,1fr) 310px; }
+    aside,main { min-height:0; overflow:auto; }
+    .rail { border-right:1px solid var(--line); padding:24px 20px; }
+    .attention { border-left:1px solid var(--line); padding:24px 20px; background:rgba(0,0,0,.12); }
+    .label { color:var(--muted); text-transform:uppercase; letter-spacing:.15em; font-size:10px; margin-bottom:12px; }
+    .exec { position:relative; border-top:1px solid var(--line); padding:17px 0 18px; }
+    .exec::before { content:""; position:absolute; left:-20px; top:22px; width:4px; height:28px; background:var(--signal); }
+    .exec h2 { margin:0 0 3px; font:600 24px/1 "Iowan Old Style",Georgia,serif; }
+    .state { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
+    .state.live,.state.working { color:var(--ok); }
+    .actions { margin-top:11px; display:flex; gap:7px; flex-wrap:wrap; }
+    .button { border:1px solid var(--line); color:var(--paper); background:transparent; padding:6px 10px; border-radius:2px; cursor:pointer; font-size:12px; transition:.15s ease; }
+    .button:hover { border-color:var(--signal); color:var(--signal); transform:translateY(-1px); }
+    .health { margin-top:28px; }
+    .health-row { display:flex; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px dotted var(--line); font-size:12px; }
+    .health-row .ok { color:var(--ok); } .health-row .missing,.health-row .degraded { color:var(--warning); }
+    .portfolio { padding:24px 28px 80px; }
+    .portfolio-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+    .portfolio-head h2 { margin:0; font:500 15px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.08em; }
+    .project { display:grid; grid-template-columns:84px minmax(180px,1fr) 130px 110px; gap:18px; align-items:center; border-top:1px solid var(--line); padding:20px 0; animation:arrive .35s both; }
+    .project:last-child { border-bottom:1px solid var(--line); }
+    .project-id { color:var(--signal); font:12px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .project h3 { margin:0 0 6px; font:500 21px/1.1 "Iowan Old Style",Georgia,serif; }
+    .task { color:var(--muted); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .stage { font:11px/1 ui-monospace,SFMono-Regular,Menlo,monospace; text-transform:uppercase; }
+    .meter { height:3px; background:#34342e; margin-top:9px; overflow:hidden; }
+    .meter>i { display:block; height:100%; background:var(--blue); width:35%; }
+    .owner-state { font-size:12px; text-transform:uppercase; color:var(--muted); }
+    .owner-state.working { color:var(--signal); }
+    .watch { border-color:#666456; }
+    .attention-item { border-top:1px solid var(--line); padding:14px 0; }
+    .attention-item strong { display:block; color:var(--warning); font:11px/1 ui-monospace,SFMono-Regular,Menlo,monospace; margin-bottom:7px; }
+    .attention-item p { margin:0; font-size:13px; line-height:1.4; color:#cbc7ba; }
+    .empty { color:var(--muted); font:italic 15px/1.5 "Iowan Old Style",Georgia,serif; border-top:1px solid var(--line); padding-top:18px; }
+    .pulse { display:inline-block; width:7px; height:7px; border-radius:50%; background:currentColor; margin-right:6px; box-shadow:0 0 0 0 currentColor; animation:pulse 2s infinite; }
+    @keyframes arrive { from { opacity:0; transform:translateY(5px); } }
+    @keyframes pulse { 60% { box-shadow:0 0 0 7px transparent; } }
+    @media(max-width:1100px) { .grid{grid-template-columns:220px 1fr}.attention{display:none}.project{grid-template-columns:70px 1fr 105px}.project .actions{grid-column:2/4} }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="masthead"><div><div class="eyebrow">OneCo / operating bridge</div><h1 id="company">Loading company…</h1></div><div class="root" id="root"></div></header>
+    <div class="grid">
+      <aside class="rail"><div class="label">Executive floor</div><div id="executives"></div><section class="health"><div class="label">Systems</div><div id="health"></div></section></aside>
+      <main class="portfolio"><div class="portfolio-head"><h2>PORTFOLIO / LIVE WORK</h2><button class="button" onclick="refresh(true)">Refresh</button></div><div id="projects"></div></main>
+      <aside class="attention"><div class="label">Attention queue</div><div id="attention"></div></aside>
+    </div>
+  </div>
+  <script>
+    const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const call = async (method, ...args) => window.pywebview.api[method](...args);
+    async function focusRole(role){await call('focus_executive',role);await refresh();}
+    async function watchOwner(id){await call('watch_owner',id);}
+    async function openFolder(id){await call('open_folder',id);}
+    function executive(role,data){const state=data?(data.lifecycle+' · '+data.work_state):'offline';return '<section class="exec"><h2>'+role+'</h2><div class="state '+esc(data&&data.work_state)+'"><span class="pulse"></span>'+esc(state)+'</div><div class="actions"><button class="button" onclick="focusRole(\''+role+'\')">'+(data?'Focus / Reopen':'Open')+'</button></div></section>';}
+    function projectRow(p,i){const ownerState=(p.owner&&p.owner.work_state)||(p.state==='active'?'offline':'not launched');const task=p.current_task||(p.latest_checkpoint&&p.latest_checkpoint.next_task)||(p.readiness_reasons&&p.readiness_reasons[0])||'Awaiting an explicit next move';const width=p.ready?100:(p.state==='shaping'?62:28);const watch=p.state==='active'?'<button class="button watch" onclick="watchOwner(\''+esc(p.id)+'\')">Watch</button>':'';return '<article class="project" style="animation-delay:'+(i*45)+'ms"><div class="project-id">'+esc(p.id)+'</div><div><h3>'+esc(p.name)+'</h3><div class="task">'+esc(task)+'</div><div class="meter"><i style="width:'+width+'%"></i></div></div><div><div class="stage">'+esc(p.state)+'</div><div class="owner-state '+esc(ownerState)+'">'+esc(ownerState)+'</div></div><div class="actions">'+watch+'<button class="button" onclick="openFolder(\''+esc(p.id)+'\')">Files</button></div></article>';}
+    async function refresh(runHealth){if(runHealth)await call('refresh_health');const s=await call('snapshot');document.getElementById('company').textContent=s.company;document.getElementById('root').textContent=s.root;document.getElementById('executives').innerHTML=['CEO','CTO'].map(r=>executive(r,s.executives[r])).join('');document.getElementById('projects').innerHTML=s.projects.length?s.projects.map(projectRow).join(''):'<div class="empty">No products yet. Talk to CEO or CTO to shape the first one.</div>';document.getElementById('health').innerHTML=s.capabilities.map(h=>'<div class="health-row"><span>'+esc(h.capability_name)+'</span><span class="'+esc(h.state)+'">'+esc(h.state)+'</span></div>').join('');document.getElementById('attention').innerHTML=s.attention.length?s.attention.map(a=>'<div class="attention-item"><strong>'+esc(a.project_id||a.kind)+'</strong><p>'+esc(a.summary)+'</p></div>').join(''):'<div class="empty">Nothing needs the Board.</div>';}
+    window.addEventListener('pywebviewready',()=>{refresh(false);setInterval(()=>refresh(false),3000);});
+  </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "oneco": {
+      "command": "/bin/sh",
+      "args": ["${PLUGIN_ROOT}/hooks/oneco-mcp.sh"],
+      "env_vars": [
+        "ONECO_ROOT",
+        "ONECO_IDENTITY",
+        "ONECO_SESSION_ID",
+        "ONECO_EPOCH",
+        "ONECO_PYTHON"
+      ]
+    }
+  }
+}

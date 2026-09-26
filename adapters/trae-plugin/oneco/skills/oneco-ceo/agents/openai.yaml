@@ -1,0 +1,4 @@
+interface:
+  display_name: "OneCo CEO"
+  short_description: "Guard product intent, scope, and momentum"
+  default_prompt: "Use $oneco-ceo to make the next evidence-based product decision."

@@ -1,0 +1,13 @@
+{
+  "schema_version": 2,
+  "company_name": "Example Company",
+  "language": "en",
+  "provider": "trae",
+  "model": "GPT-5.6-Sol",
+  "desktop": {
+    "cockpit": "macos-webview",
+    "executives": "ghostty",
+    "owners": "tmux"
+  },
+  "created_at": "2026-01-01T00:00:00Z"
+}

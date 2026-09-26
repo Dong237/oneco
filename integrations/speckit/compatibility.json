@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "integration_id": "oneco-speckit",
+  "integration_version": "0.1.0",
+  "status": "supported-local-preset",
+  "spec_kit": {
+    "tested_cli_version": "1.0.3",
+    "required_version": ">=1.0.3,<2.0.0",
+    "preset_manifest_schema": "1.0",
+    "bundle_manifest_included": false,
+    "bundle_limitation": "Spec Kit 1.0.3 parses bundle component source fields but does not install a preset embedded in a local bundle. Use the local development preset directly."
+  },
+  "install": {
+    "cwd": "project-root",
+    "argv": [
+      "specify",
+      "preset",
+      "add",
+      "--dev",
+      "{integration_dir}/preset"
+    ],
+    "force": false
+  },
+  "stage": {
+    "stdout": "single-json-object",
+    "exit_codes": {
+      "0": "staged-or-already-compatible",
+      "2": "validation-or-conflict-error-no-planned-writes"
+    },
+    "argv": [
+      "{integration_dir}/bin/stage-project",
+      "--project-dir",
+      "{project_dir}",
+      "--feature-number",
+      "{feature_number}",
+      "--feature-slug",
+      "{feature_slug}",
+      "--brief",
+      "{brief_path}",
+      "--spec-id",
+      "{spec_id}"
+    ],
+    "optional_arguments": [
+      "--spec-id"
+    ],
+    "feature_number_pattern": "^[0-9]{3}$",
+    "feature_slug_pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+    "default_spec_id": "SPEC-{feature_number}",
+    "spec_id_pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    "checkpoint_task_id_pattern": "^T[0-9]{3}$",
+    "conflict_policy": "validate-all-before-write"
+  },
+  "artifacts": {
+    "brief": "BRIEF.md",
+    "constitution": ".specify/memory/constitution.md",
+    "feature_state": ".specify/feature.json",
+    "spec_seed": "spec-seeds/{feature_number}-{feature_slug}.md",
+    "active_spec": "specs/{feature_number}-{feature_slug}/spec.md"
+  }
+}

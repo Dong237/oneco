@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+"""Safely stage deterministic OneCo artifacts in an existing project."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import tempfile
+from pathlib import Path
+
+FEATURE_NUMBER = re.compile(r"^[0-9]{3}$")
+FEATURE_SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+SPEC_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def fail(message: str) -> int:
+    print(json.dumps({"ok": False, "error": message}, separators=(",", ":")))
+    return 2
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--project-dir", required=True, type=Path)
+    parser.add_argument("--feature-number", required=True)
+    parser.add_argument("--feature-slug", required=True)
+    parser.add_argument("--brief", required=True, type=Path)
+    parser.add_argument("--spec-id")
+    return parser.parse_args()
+
+
+def read_required(path: Path, label: str) -> str:
+    if not path.is_file():
+        raise ValueError(f"{label} is not a file: {path}")
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f"cannot read {label}: {exc}") from exc
+    if not content.strip():
+        raise ValueError(f"{label} must not be empty: {path}")
+    return content
+
+
+def contained(root: Path, path: Path, label: str) -> Path:
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"{label} escapes project directory: {path}") from exc
+    return resolved
+
+
+def preserve_nonempty(path: Path) -> bool:
+    """Return whether an existing authored/scaffold artifact is safe to keep."""
+    return path.is_file() and bool(path.read_bytes().strip())
+
+
+def reject_parent_conflicts(root: Path, path: Path) -> None:
+    """Reject a file or symlink where a required project directory must be."""
+    current = path.parent
+    while current != root:
+        if current.exists() and (not current.is_dir() or current.is_symlink()):
+            raise ValueError(f"required directory path is blocked: {current}")
+        current = current.parent
+
+
+def template(name: str) -> str:
+    path = Path(__file__).resolve().parent.parent / "preset" / "templates" / name
+    return read_required(path, name)
+
+
+def seed_text(spec_id: str, feature_name: str, brief_rel: str) -> str:
+    return f"""# DRAFT-SEED - First Vertical Result
+
+**Spec ID**: {spec_id}
+**Feature**: {feature_name}
+**Source brief**: `{brief_rel}`
+
+## User and situation
+
+Derive from the source brief with the Board and CEO.
+
+## Desired behavior and outcome
+
+Derive from the source brief with the Board and CEO.
+
+## Smallest vertical result
+
+Define one runnable end-to-end outcome.
+
+## Acceptance examples
+
+Define independently testable Given/When/Then examples.
+
+## Explicit non-goals
+
+Preserve the source brief boundaries.
+
+## Technical constraints and quality floor
+
+Derive with the CTO and the project constitution.
+
+## Known unknowns and escalation triggers
+
+Name unsafe, irreversible, conflicting, or product-changing decisions.
+"""
+
+
+def atomic_create(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+            os.fchmod(handle.fileno(), 0o644)
+        try:
+            os.link(temp_path, path)
+        except FileExistsError as exc:
+            raise RuntimeError(f"destination appeared during staging: {path}") from exc
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def create_all(root: Path, paths: list[Path], desired: dict[Path, bytes]) -> None:
+    """Create the staged set and roll it back if a concurrent conflict occurs."""
+    created_files: list[Path] = []
+    missing_dirs: set[Path] = set()
+    for path in paths:
+        current = path.parent
+        while current != root and not current.exists():
+            missing_dirs.add(current)
+            current = current.parent
+    try:
+        for path in paths:
+            atomic_create(path, desired[path])
+            created_files.append(path)
+    except Exception:
+        for path in reversed(created_files):
+            path.unlink(missing_ok=True)
+        for directory in sorted(missing_dirs, key=lambda item: len(item.parts), reverse=True):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+        raise
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        project = args.project_dir.resolve()
+        if not project.is_dir():
+            raise ValueError(f"project directory does not exist: {project}")
+        if not FEATURE_NUMBER.fullmatch(args.feature_number):
+            raise ValueError("feature number must be exactly three decimal digits")
+        if not FEATURE_SLUG.fullmatch(args.feature_slug):
+            raise ValueError("feature slug must be lowercase kebab-case")
+        spec_id = args.spec_id or f"SPEC-{args.feature_number}"
+        if not SPEC_ID.fullmatch(spec_id):
+            raise ValueError("spec id must be a path-safe identifier")
+
+        brief_input = args.brief if args.brief.is_absolute() else project / args.brief
+        brief = contained(project, brief_input, "brief")
+        read_required(brief, "brief")
+        feature_name = f"{args.feature_number}-{args.feature_slug}"
+        feature_dir = contained(project, project / "specs" / feature_name, "feature directory")
+        seed = contained(
+            project, project / "spec-seeds" / f"{feature_name}.md", "spec seed"
+        )
+        constitution = contained(
+            project, project / ".specify" / "memory" / "constitution.md", "constitution"
+        )
+        feature_state = contained(
+            project, project / ".specify" / "feature.json", "feature state"
+        )
+        active_spec = contained(project, feature_dir / "spec.md", "active spec")
+
+        for sibling in (project / "specs").glob(f"{args.feature_number}-*"):
+            if sibling.resolve() != feature_dir.resolve():
+                raise ValueError(
+                    f"feature number {args.feature_number} is already owned by {sibling.name}"
+                )
+        for sibling in (project / "spec-seeds").glob(f"{args.feature_number}-*.md"):
+            if sibling.resolve() != seed.resolve():
+                raise ValueError(
+                    f"feature number {args.feature_number} is already seeded by {sibling.name}"
+                )
+
+        state = {
+            "feature_directory": f"specs/{feature_name}",
+            "feature_number": args.feature_number,
+            "feature_slug": args.feature_slug,
+            "spec_id": spec_id,
+            "seed_file": f"spec-seeds/{feature_name}.md",
+            "brief_file": brief.relative_to(project).as_posix(),
+            "task_id_pattern": "^T[0-9]{3}$",
+        }
+        desired: dict[Path, bytes] = {
+            seed: seed_text(spec_id, feature_name, state["brief_file"]).encode(),
+            constitution: template("constitution-template.md").encode(),
+            feature_state: (json.dumps(state, indent=2) + "\n").encode(),
+            active_spec: template("spec-template.md").encode(),
+        }
+
+        # Complete conflict preflight before the first write. Existing authored
+        # artifacts are preserved; identity-bearing state must be compatible.
+        created: list[Path] = []
+        preserved: list[Path] = [brief]
+        authored_artifacts = {seed, constitution, active_spec}
+        for path, content in desired.items():
+            reject_parent_conflicts(project, path)
+            if path.exists():
+                if path in authored_artifacts and preserve_nonempty(path):
+                    preserved.append(path)
+                    continue
+                if path == feature_state and path.is_file():
+                    try:
+                        current_state = json.loads(path.read_text(encoding="utf-8"))
+                    except (UnicodeError, json.JSONDecodeError) as exc:
+                        raise ValueError(f"invalid existing feature state: {path}") from exc
+                    compatible_state = isinstance(current_state, dict) and all(
+                        key not in current_state or current_state[key] == value
+                        for key, value in state.items()
+                    )
+                    if (
+                        compatible_state
+                        and current_state.get("feature_directory")
+                        == state["feature_directory"]
+                    ):
+                        preserved.append(path)
+                        continue
+                if not path.is_file() or path.read_bytes() != content:
+                    raise ValueError(f"refusing to overwrite existing artifact: {path}")
+                preserved.append(path)
+            else:
+                created.append(path)
+
+        create_all(project, created, desired)
+
+        result = {
+            "ok": True,
+            "project_dir": str(project),
+            "feature_directory": state["feature_directory"],
+            "feature_number": args.feature_number,
+            "feature_slug": args.feature_slug,
+            "spec_id": spec_id,
+            "task_id_pattern": state["task_id_pattern"],
+            "brief_file": state["brief_file"],
+            "constitution_file": constitution.relative_to(project).as_posix(),
+            "seed_file": state["seed_file"],
+            "spec_file": active_spec.relative_to(project).as_posix(),
+            "created": [path.relative_to(project).as_posix() for path in created],
+            "preserved": [path.relative_to(project).as_posix() for path in preserved],
+        }
+        print(json.dumps(result, separators=(",", ":"), sort_keys=True))
+        return 0
+    except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
+        return fail(str(exc))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

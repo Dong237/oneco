@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oneco:schema:instruction:1",
+  "title": "OneCo executive instruction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "instruction_id",
+    "sender_authority",
+    "action",
+    "project_id",
+    "spec_id",
+    "task_id",
+    "observed",
+    "evidence",
+    "required_action",
+    "do_not",
+    "acceptance_delta",
+    "effective_boundary",
+    "requires_spec_revision",
+    "created_at"
+  ],
+  "properties": {
+    "instruction_id": { "type": "string", "minLength": 1 },
+    "sender_authority": { "enum": ["CEO", "CTO"] },
+    "action": {
+      "enum": [
+        "ALIGN",
+        "NARROW",
+        "RESEQUENCE",
+        "CONTINUE",
+        "CORRECT",
+        "SIMPLIFY",
+        "HARDEN",
+        "ESCALATE"
+      ]
+    },
+    "project_id": { "type": "string", "pattern": "^PROJ-[0-9]{3,}$" },
+    "spec_id": { "type": "string", "minLength": 1 },
+    "task_id": { "type": "string", "minLength": 1 },
+    "observed": { "type": "string", "minLength": 1 },
+    "evidence": { "type": "string", "minLength": 1 },
+    "required_action": { "type": "string", "minLength": 1 },
+    "do_not": { "type": "string", "minLength": 1 },
+    "acceptance_delta": { "type": "string" },
+    "effective_boundary": { "type": "string", "minLength": 1 },
+    "requires_spec_revision": { "type": "boolean" },
+    "created_at": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "sender_authority": { "const": "CEO" } } },
+      "then": {
+        "properties": {
+          "action": { "enum": ["ALIGN", "NARROW", "RESEQUENCE", "CONTINUE", "ESCALATE"] }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "sender_authority": { "const": "CTO" } } },
+      "then": {
+        "properties": {
+          "action": { "enum": ["CORRECT", "SIMPLIFY", "HARDEN", "CONTINUE", "ESCALATE"] }
+        }
+      }
+    }
+  ]
+}

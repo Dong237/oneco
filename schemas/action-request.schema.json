@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oneco:schema:action-request:1",
+  "title": "OneCo external action request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "action_id",
+    "requester",
+    "project_id",
+    "domain",
+    "summary",
+    "effect",
+    "reversible",
+    "status",
+    "created_at"
+  ],
+  "properties": {
+    "action_id": { "type": "string", "minLength": 1 },
+    "requester": { "type": "string", "minLength": 1 },
+    "project_id": { "type": "string", "pattern": "^PROJ-[0-9]{3,}$" },
+    "domain": { "enum": ["product", "technical", "cross_domain"] },
+    "summary": { "type": "string", "minLength": 1 },
+    "effect": { "type": "string", "minLength": 1 },
+    "reversible": { "type": "boolean" },
+    "status": { "enum": ["pending", "approved", "rejected"] },
+    "approvals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["approver", "decision", "note", "created_at"],
+        "properties": {
+          "approver": { "enum": ["CEO", "CTO"] },
+          "decision": { "enum": ["approve", "reject"] },
+          "note": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}

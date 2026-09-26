@@ -1,0 +1,83 @@
+[project]
+name = "oneco-os"
+version = "0.2.0"
+description = "Local-first operating system for a one-person AI-native company"
+readme = "README.md"
+license = "MIT"
+keywords = ["ai-agents", "local-first", "multi-agent", "product-development", "traecode"]
+authors = [
+    { name = "Dong237", email = "youxiang.dong@outlook.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.10,<3",
+    "rich>=13.9,<15",
+    "typer>=0.15,<1",
+    "mcp>=1.26,<2",
+    "pywebview>=6.2,<7; sys_platform == 'darwin'",
+]
+
+[project.urls]
+Homepage = "https://github.com/Dong237/oneco"
+Repository = "https://github.com/Dong237/oneco"
+Documentation = "https://github.com/Dong237/oneco#readme"
+Issues = "https://github.com/Dong237/oneco/issues"
+
+[project.scripts]
+oneco = "oneco_os.cli:app"
+
+[dependency-groups]
+dev = [
+    "jsonschema>=4.23,<5",
+    "pytest>=8.3,<10",
+    "pytest-cov>=6,<8",
+    "ruff>=0.14,<1",
+]
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/oneco_os"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"adapters" = "oneco_os/resources/adapters"
+"docs" = "oneco_os/resources/docs"
+"integrations" = "oneco_os/resources/integrations"
+"schemas" = "oneco_os/resources/schemas"
+"templates" = "oneco_os/resources/templates"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/adapters",
+    "/docs",
+    "/integrations",
+    "/schemas",
+    "/templates",
+    "/tests",
+    "/README.md",
+    "/README.zh-CN.md",
+    "/CONTRIBUTING.md",
+    "/LICENSE",
+    "/pyproject.toml",
+    "/uv.lock",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests", "integrations/speckit/tests"]
+markers = [
+    "anyio: asynchronous boundary test using AnyIO",
+]
+
+[tool.coverage.run]
+source = ["oneco_os"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

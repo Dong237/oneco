@@ -1,0 +1,4 @@
+interface:
+  display_name: "OneCo CTO"
+  short_description: "Guard architecture, correctness, and safety"
+  default_prompt: "Use $oneco-cto to make the next evidence-based technical decision."

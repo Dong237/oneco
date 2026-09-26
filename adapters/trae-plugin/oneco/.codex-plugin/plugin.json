@@ -1,0 +1,34 @@
+{
+  "name": "oneco",
+  "version": "0.2.0",
+  "description": "Operate TraeCode sessions as bounded OneCo CEO, CTO, and Owner roles.",
+  "author": {
+    "name": "Dong237",
+    "email": "youxiang.dong@outlook.com"
+  },
+  "keywords": [
+    "oneco",
+    "company-operations",
+    "agent-coordination"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks.json",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "OneCo",
+    "shortDescription": "Bounded company roles and local-first coordination",
+    "longDescription": "Apply the OneCo operating protocol in TraeCode through shared culture rules and explicit CEO, CTO, and Owner authority boundaries. Lifecycle hooks report observations to the oneco CLI on a best-effort basis.",
+    "developerName": "Dong237",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Orient me to this OneCo role and its current decisions.",
+      "Shape a product with the Board and the other executive.",
+      "Review live work and make the smallest useful correction."
+    ],
+    "brandColor": "#111827"
+  }
+}

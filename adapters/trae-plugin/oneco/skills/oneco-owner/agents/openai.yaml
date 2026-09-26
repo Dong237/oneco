@@ -1,0 +1,4 @@
+interface:
+  display_name: "OneCo Owner"
+  short_description: "Execute, verify, checkpoint, and continue"
+  default_prompt: "Use $oneco-owner to execute and checkpoint the next owned task."
