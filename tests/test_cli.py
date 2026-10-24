@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from oneco_os import __version__
@@ -26,6 +27,10 @@ def test_root_help_and_version_expose_stable_cli_surface() -> None:
     for command in (
         "company",
         "project",
+        "signal",
+        "bet",
+        "release",
+        "supervision",
         "status",
         "message",
         "inbox",
@@ -39,7 +44,56 @@ def test_root_help_and_version_expose_stable_cli_surface() -> None:
     assert invoke_ok("--version").output.strip() == __version__
 
 
-def test_company_init_project_register_and_status_json_round_trip(tmp_path: Path) -> None:
+@pytest.mark.parametrize("unsupported", [(3, 12, 0), (3, 13, 0)])
+def test_doctor_rejects_python_versions_without_a_verified_native_runtime(
+    monkeypatch: pytest.MonkeyPatch, unsupported: tuple[int, int, int]
+) -> None:
+    monkeypatch.setattr("oneco_os.cli.sys.version_info", unsupported)
+    monkeypatch.setattr("oneco_os.cli.sys.version", ".".join(str(part) for part in unsupported))
+    monkeypatch.setattr("oneco_os.cli.shutil.which", lambda command: f"/usr/bin/{command}")
+    monkeypatch.setattr(
+        "oneco_os.cli.trae.require_model", lambda model: Path("/usr/bin/traecli")
+    )
+    monkeypatch.setattr(
+        "oneco_os.adapters.ghostty.health",
+        lambda: {"state": "ok", "diagnostic": "test Ghostty"},
+    )
+
+    result = runner.invoke(app, ["doctor", "--json"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    python = next(check for check in payload["checks"] if check["name"] == "python")
+    assert python["ok"] is False
+    assert "requires Python 3.11" in python["detail"]
+
+
+def test_board_can_assign_and_list_a_traceable_signal(tmp_path: Path) -> None:
+    root = tmp_path / "company"
+    invoke_ok("company", "init", root, "--name", "CLI Company", "--no-git-init")
+
+    added = json.loads(
+        invoke_ok(
+            "signal",
+            "add",
+            "--root",
+            root,
+            "--title",
+            "Observed pain",
+            "--summary",
+            "Users repeat this manual step.",
+            "--source-uri",
+            "board://turn-1",
+            "--json",
+        ).output
+    )
+    listed = json.loads(invoke_ok("signal", "list", "--root", root, "--json").output)
+
+    assert added["signal_id"] == "SIG-0001"
+    assert [item["signal_id"] for item in listed] == ["SIG-0001"]
+
+
+def test_company_init_disables_direct_project_registration(tmp_path: Path) -> None:
     root = tmp_path / "company"
 
     initialized = invoke_ok(
@@ -47,7 +101,9 @@ def test_company_init_project_register_and_status_json_round_trip(tmp_path: Path
     )
     assert json.loads(initialized.output)["company"]["company_name"] == "CLI Company"
 
-    registered = invoke_ok(
+    registered = runner.invoke(
+        app,
+        [
         "project",
         "register",
         "--root",
@@ -58,14 +114,14 @@ def test_company_init_project_register_and_status_json_round_trip(tmp_path: Path
         "first-product",
         "--no-git-init",
         "--json",
+        ],
     )
-    assert json.loads(registered.output)["id"] == "PROJ-001"
+    assert registered.exit_code == 2
+    assert "Board-selected Bet" in registered.output
 
     status = json.loads(invoke_ok("status", "--root", root, "--json").output)
     assert status["company"] == "CLI Company"
-    assert [(project["id"], project["path"]) for project in status["projects"]] == [
-        ("PROJ-001", "first-product")
-    ]
+    assert status["projects"] == []
     assert "leaderboard" not in status
     assert "scores" not in status
 
@@ -96,7 +152,7 @@ def test_cli_rejects_duplicate_init_and_path_escape_without_traceback(tmp_path: 
         ],
     )
     assert escaped.exit_code == 2
-    assert "direct children" in escaped.output
+    assert "Board-selected Bet" in escaped.output
     assert not (tmp_path / "escape").exists()
 
 
@@ -257,7 +313,9 @@ def test_cli_action_roles_and_runtime_rebuild(active_project: tuple[Workspace, s
     assert "approved" in second.output
 
     rebuilt = json.loads(invoke_ok("runtime", "rebuild", "--root", workspace.root, "--json").output)
-    assert rebuilt == {"checkpoints": 0, "instructions": 0, "actions": 1}
+    assert rebuilt["actions"] == 1
+    assert rebuilt["checkpoints"] == 0
+    assert rebuilt["instructions"] == 0
     with workspace.runtime.connect() as connection:
         row = connection.execute(
             "SELECT status FROM action_requests WHERE action_id=?", (action.action_id,)

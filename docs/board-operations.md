@@ -1,85 +1,102 @@
 # Board operations
 
-The human is the Board. Your normal interface is one Cockpit and two conversations—not tmux and not a command console.
+You are the Board. Your normal workspace is the Cockpit plus three persistent conversations: CPO, CEO, and CTO. Owners run in hidden tmux panes and appear only after a project passes the launch gate.
 
-## Start the company
+## Daily playbook
 
-Double-click `OneCo — COMPANY.app` in `~/Applications`, or run:
+1. Start once:
+
+   ```bash
+   oneco start --root /path/to/company
+   ```
+
+2. In Cockpit, assign a market Signal with its source. A Board idea, link, interview note, or reviewed Daily Product Teardown artifact can be a Signal. OneCo never runs Daily Product Teardown automatically.
+3. Tell CPO to investigate the assigned `SIG-NNNN`. CPO uses appropriate external research skills, preserves contradictory evidence, and submits a versioned Product Bet.
+4. In Cockpit, choose one action on the exact revision:
+   - **Select**: CEO may promote it.
+   - **More evidence**: name the missing evidence, not how CPO must obtain it.
+   - **Reject**: keep the record; create no project.
+5. Tell CEO to promote the selected Bet and shape the smallest useful result with CTO. CEO protects product intent; CTO protects technical safety. Both endorse the same launch digest.
+6. After launch, let the Owner execute. Use **Watch** only when you need the live log. Ask CEO about product choices and CTO about technical choices.
+7. When the Owner records a verified release candidate, CEO and CTO independently endorse its exact digest. Approve production in Cockpit only after both are ready.
+8. Close Cockpit whenever you like; supervision continues. Stop the company background supervisor explicitly:
+
+   ```bash
+   oneco stop --root /path/to/company
+   ```
+
+## Useful commands
 
 ```bash
-oneco start --root /path/to/company
+oneco status --root /path/to/company
+oneco talk CPO --root /path/to/company
+oneco talk CEO --root /path/to/company
+oneco talk CTO --root /path/to/company
+oneco signal list --root /path/to/company --json
+oneco bet list --root /path/to/company --json
+oneco doctor --root /path/to/company
+oneco runtime rebuild --root /path/to/company
 ```
 
-You see:
+Routine product work should happen conversationally through the authorized role tools. Direct `oneco project register` is disabled in v1; CEO promotion is the only normal project-creation path.
 
-- a native Cockpit with CEO/CTO presence, every project, current task, Owner state, queued work, health, and items requiring Board attention;
-- a canonical CEO in one native Ghostty window;
-- a canonical CTO in another native Ghostty window.
+## Escalation rules
 
-The Cockpit is for awareness and navigation, not project forms. Click an executive to focus or reopen its exact conversation. Click Watch on a project to open a read-only Ghostty view of its hidden Owner worker.
+- A routine checkpoint does not stop the Owner. Compatible work continues.
+- A real gate—unsafe change, irreversible action, architecture conflict, acceptance failure, or product-intent change—stops only affected work and routes to CTO or CEO.
+- CEO has final product and sequence authority only inside CTO's evidence-backed safety envelope.
+- Material CEO/CTO conflict comes to you. No agent silently resolves it.
+- Verification is not production approval.
 
-## Shape and start a product
+## Narrow launch waiver
 
-Talk normally. A typical Board flow is:
+Normal launch requires matching CEO and CTO endorsements. If exactly one peer is unavailable and every mandatory artifact is complete, tell the available executive in a fresh message:
 
 ```text
-Board → CEO: I want to build X for Y. The first outcome should be Z. Challenge the scope and create it when concrete.
-CEO → Board: My recommended first vertical result is ... The one decision I need is ...
-Board → CTO: Inspect PROJ-001. Give me the smallest sound technical path and write the quality boundary.
-CTO → Board: Use ... Avoid ... The launch packet is technically ready / needs this decision.
-Board → CEO or CTO: Launch it once you both endorse this exact packet.
+Just launch PROJ-001.
 ```
 
-CEO/CTO use OneCo tools inside their conversations to create the workspace, read one another's messages, edit the initial Brief/Spec/constitution, endorse, launch, and wake the Owner. You do not run those commands yourself. A product cannot launch until its Brief, Spec or seed, constitution, acceptance criteria, non-goals, and Git boundary are present.
+The waiver is tied to that human turn, lasts briefly, is consumed once, and waives only the absent peer endorsement. It cannot waive the Brief, Spec, constitution, acceptance criteria, non-goals, Git boundary, or both endorsements at once.
 
-Normal launch requires both executive endorsements. If one executive is unavailable and the artifacts are complete, tell the other in a fresh message: `Just launch PROJ-001.` The override applies once, is tied to that exact human turn, and waives only the absent peer endorsement.
+## Recovery
 
-## Supervise without micromanaging
-
-Owners execute continuously in atomic turns. They use Spec Kit to produce or refine `spec.md`, `plan.md`, and `tasks.md`, complete the smallest accepted task, verify it, checkpoint it, and claim the next compatible item.
-
-Ask CEO about user intent, scope, sequence, momentum, and simplicity. Ask CTO about actual architecture, tests, correctness, safety, and unnecessary machinery. If either finds drift, they call a bounded Owner instruction themselves. While the Owner is busy, it stays queued until the atomic boundary and then wakes automatically.
-
-The five races are not rankings between heterogeneous products:
-
-| Owner behavior | Useful pressure | Bad proxy never rewarded |
+| Situation | Expected behavior | Board action |
 | --- | --- | --- |
-| Closure | Smallest runnable vertical loop | Number of features |
-| Commitment | Finish the accepted Spec promise | Online time |
-| Simplicity | Fewer justified layers and dependencies | Code volume |
-| Truth | Expose failures and unknowns early | Polished status theater |
-| Reuse | Share demonstrated practices quickly | Report length or Token use |
+| CPO/CEO/CTO window closes | Reopens the same role session and exact Trae thread | Click the role in Cockpit or run `oneco talk ROLE` |
+| Owner pane dies | Claimed work is requeued; exact Owner thread resumes | Inspect only if failure repeats |
+| Old role process returns | Epoch fence rejects its writes and messages | None |
+| SQLite is lost | Git-backed Signals, Bets, decisions, projects, reviews, and releases remain | Run `oneco runtime rebuild`, then restart |
+| Chat context is lost | Role reconstructs state from snapshot, inbox, and artifacts | Ask it to re-ground, not to guess |
+| External research skill is missing | Health shows an explicit missing capability | Install the named skill or revise the evidence request |
+| CEO and CTO disagree materially | Owner continues only compatible work | Decide the product-versus-safety tradeoff explicitly |
 
-Reliable Owners earn broader autonomous execution spans. Drift or hidden uncertainty earns narrower instructions and more frequent checkpoints. Repeated protocol failure may replace an Owner session, but the product is never paused because coding capacity is scarce.
+## Parallel research and role recovery
 
-## Parallel executive conversations
+Ask a persistent role to fork a bounded delegate when useful. A CPO research delegate reports only to CPO; CEO/CTO Secretaries report only to their parent. They cannot inherit the parent identity or use privileged tools.
 
-Tell CEO or CTO: “Fork a secretary to explore pricing without changing the current direction.” They call the branch tool and a titled Ghostty window opens with the exact parent Trae context. The Secretary may research and send advice only to its parent; it cannot endorse, launch, approve, instruct an Owner, or become a second canonical executive.
+Use a recovery candidate only when an exact role thread cannot resume. The candidate asks you for a short-lived phrase such as `PROMOTE CPO 7K4N`. Enter it in that exact candidate conversation; successful succession increments the epoch and fences the old process.
 
-The operator fallback is:
+## Pressure-test contract
 
-```bash
-oneco branch CEO --purpose "pricing alternative" --root /path/to/company
-```
-
-If an executive thread cannot resume at all, create a recovery-candidate branch. The candidate requests a short-lived phrase and asks you to type it exactly in that same chat. Only then does OneCo promote it and fence the old executive. Do not use recovery candidates for ordinary brainstorming.
-
-## Common scenarios
-
-| Situation | System behavior | Board action |
-| --- | --- | --- |
-| Owner adds unapproved behavior | CEO queues `NARROW` or `ALIGN` with evidence | Decide only if product intent itself must change |
-| Owner creates premature infrastructure | CTO queues `SIMPLIFY` | None unless the architecture principle changes |
-| Tests or safety fail | CTO blocks only the affected merge/deploy and names the unblock condition | Decide only material risk acceptance |
-| New instruction arrives mid-task | SQLite queues it; current atomic turn is not interrupted | None |
-| Owner pane dies mid-task | Claimed work is requeued; exact Trae thread resumes | Inspect only if repeated |
-| CEO/CTO window closes | Reopen resumes the same UUID and context | Click the executive in Cockpit |
-| CEO and CTO conflict materially | Owner continues only compatible work | Resolve direction explicitly |
-| Brief/Spec changes after endorsement | Digest invalidates both endorsements | Ask both to re-review |
-| External product action | Durable approval request goes to CEO | Intervene only for strategic commitment |
-| External technical/data action | Durable approval request goes to CTO | Intervene for sensitive/high-risk access |
-| Runtime is damaged | Versioned artifacts remain intact | Run `oneco runtime rebuild`, then restart |
-
-## Anti-AI-taste standard
-
-Executives lead with one decision, evidence, and the next needed action. They do not produce ceremonial strategy decks, generic frameworks, long option menus, invented confidence, or status reports that do not change a decision. CEO inspects real behavior when it matters; CTO runs the product, code, and tests when the claim depends on them. Context is rich before delegation, control is light after it, and corrections are short and concrete.
+| # | Actor / scenario | Allowed and durable change | Forbidden | Runtime, Cockpit, retry/recovery |
+| --- | --- | --- | --- | --- |
+| 1 | Board idea or teardown artifact | Board records either as a sourced Signal | CPO scheduling teardown | CPO gets one assignment; both appear identically as Signals |
+| 2 | CPO drafts/revises | Bet files and immutable submitted manifest | Select, reject, promote, endorse, launch, approve, instruct | Unauthorized MCP calls fail closed |
+| 3 | Board asks for evidence | Digest-bound `more_evidence` with named gap | Prescribing a required research method | CPO receives idempotent work and sees only the new gap |
+| 4 | Board rejects | Decision history remains | Project creation | Cockpit shows rejected Bet; rebuild preserves it |
+| 5 | Board selects | Exact revision/digest decision | Promoting another digest | CEO receives promotion work; copied handoff matches byte-for-byte |
+| 6 | Selected Bet changes | New revision requires new selection | Stale promotion | Digest/revision check fails before project creation |
+| 7 | CEO/CTO disagree | Evidence-backed review and Board escalation | CPO deciding; global stop | Only affected work blocks; compatible Owner work continues |
+| 8 | Launch artifact changes | New digest | Reusing endorsements | Both endorsements read stale in Cockpit and runtime |
+| 9 | Owner has a question | Product to CEO; technical to CTO | CPO interception | Scoped messages, explicit acknowledgement, retry-safe order |
+| 10 | CPO adds post-selection evidence | Advice to CEO/CTO | Project or queue mutation | Project remains unchanged |
+| 11 | Role windows close | Exact-thread resume | Implicit last-thread selection | Cockpit shows lost/live state; no durable truth changes |
+| 12 | Replaced CPO returns | None | Write or message as CPO | Epoch fence rejects the stale session |
+| 13 | CPO delegate reports | Message to CPO | Becoming CPO or messaging delivery roles | Parent-only route survives retries |
+| 14 | Duplicate/out-of-order traffic | One idempotent message; explicit ack | Duplicate work | Per-thread sequence remains intelligible; retry is safe |
+| 15 | SQLite loss | Rebuild indexes/queues from Git | Treating SQLite as memory | Cockpit repopulates from artifacts |
+| 16 | Chat loss | Re-read bounded snapshot and files | Inventing prior decisions | Exact role thread is helpful but not required for truth |
+| 17 | Multiple Bets/products | Independent records and Owner queues | Agent-owned portfolio allocation | Cockpit displays all; Board chooses attention |
+| 18 | Validation status varies | Preserve passed/mixed/failed/invalid/TBD as evidence | Automatic selection/rejection | Any state may reach Board with confidence boundary |
+| 19 | External skill unavailable | Explicit capability error | Silent substitute | Health names the missing contract; artifacts remain intact |
+| 20 | Increment verified | Release candidate and endorsements | Automatic production | Board decision queues exactly one release action; result is separate |

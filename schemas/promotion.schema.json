@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oneco:schema:promotion:1",
+  "title": "OneCo selected-Bet promotion",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["promotion_id", "bet_id", "revision", "packet_digest", "board_decision_id", "project_id", "project_commit", "promoted_by", "created_at"],
+  "properties": {
+    "promotion_id": {"type": "string", "minLength": 1},
+    "bet_id": {"type": "string", "pattern": "^BET-[0-9]{4,}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "packet_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "board_decision_id": {"type": "string", "minLength": 1},
+    "project_id": {"type": "string", "pattern": "^PROJ-[0-9]{3,}$"},
+    "project_commit": {"type": ["string", "null"]},
+    "promoted_by": {"const": "CEO"},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

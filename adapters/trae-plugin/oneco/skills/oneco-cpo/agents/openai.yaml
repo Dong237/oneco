@@ -1,0 +1,4 @@
+interface:
+  display_name: "OneCo CPO"
+  short_description: "Research Board signals and prepare Product Bets"
+  default_prompt: "Use $oneco:oneco-cpo to investigate an assigned OneCo Signal and prepare an evidence-backed Product Bet for Board review."

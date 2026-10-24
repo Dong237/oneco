@@ -28,10 +28,19 @@ def oneco_command() -> list[str]:
     return [sys.executable, "-m", "oneco_os.cli"]
 
 
+def server_name(name_or_target: str) -> str:
+    """Use a dedicated tmux server for each OneCo company session."""
+    return name_or_target.split(":", 1)[0]
+
+
+def server_command(name_or_target: str, *arguments: str) -> list[str]:
+    return [require_tmux(), "-L", server_name(name_or_target), *arguments]
+
+
 def has_session(name: str) -> bool:
     return (
         subprocess.run(
-            [require_tmux(), "has-session", "-t", name], capture_output=True, check=False
+            server_command(name, "has-session", "-t", name), capture_output=True, check=False
         ).returncode
         == 0
     )
@@ -42,7 +51,9 @@ def ensure_session(name: str, root: Path) -> None:
         return
     command = shlex.join([*oneco_command(), "board", "--root", str(root)])
     result = subprocess.run(
-        [require_tmux(), "new-session", "-d", "-s", name, "-n", "board", "-c", str(root), command],
+        server_command(
+            name, "new-session", "-d", "-s", name, "-n", "board", "-c", str(root), command
+        ),
         capture_output=True,
         text=True,
         check=False,
@@ -52,10 +63,9 @@ def ensure_session(name: str, root: Path) -> None:
 
 
 def ensure_window(name: str, window: str, cwd: Path, command: list[str]) -> str:
-    tmux = require_tmux()
     target = f"{name}:{window}"
     exists = subprocess.run(
-        [tmux, "list-windows", "-t", name, "-F", "#{window_name}"],
+        server_command(name, "list-windows", "-t", name, "-F", "#{window_name}"),
         capture_output=True,
         text=True,
         check=False,
@@ -63,7 +73,18 @@ def ensure_window(name: str, window: str, cwd: Path, command: list[str]) -> str:
     if exists.returncode == 0 and window in exists.stdout.splitlines():
         return target
     result = subprocess.run(
-        [tmux, "new-window", "-d", "-t", name, "-n", window, "-c", str(cwd), shlex.join(command)],
+        server_command(
+            name,
+            "new-window",
+            "-d",
+            "-t",
+            name,
+            "-n",
+            window,
+            "-c",
+            str(cwd),
+            shlex.join(command),
+        ),
         capture_output=True,
         text=True,
         check=False,
@@ -74,7 +95,8 @@ def ensure_window(name: str, window: str, cwd: Path, command: list[str]) -> str:
 
 
 def select_window(name: str, window: str) -> None:
-    subprocess.run([require_tmux(), "select-window", "-t", f"{name}:{window}"], check=False)
+    target = f"{name}:{window}"
+    subprocess.run(server_command(target, "select-window", "-t", target), check=False)
 
 
 def notify(target: str | None, text: str) -> bool:
@@ -82,7 +104,9 @@ def notify(target: str | None, text: str) -> bool:
         return False
     compact = re.sub(r"\s+", " ", text).strip()[:240]
     result = subprocess.run(
-        [require_tmux(), "display-message", "-t", target, compact], capture_output=True, check=False
+        server_command(target, "display-message", "-t", target, compact),
+        capture_output=True,
+        check=False,
     )
     return result.returncode == 0
 
@@ -90,7 +114,7 @@ def notify(target: str | None, text: str) -> bool:
 def target_alive(target: str) -> bool:
     """Return whether a tmux target exists and its pane process is still running."""
     result = subprocess.run(
-        [require_tmux(), "display-message", "-p", "-t", target, "#{pane_dead}"],
+        server_command(target, "display-message", "-p", "-t", target, "#{pane_dead}"),
         capture_output=True,
         text=True,
         check=False,
@@ -100,20 +124,33 @@ def target_alive(target: str) -> bool:
 
 def ensure_owner_target(name: str, window: str, cwd: Path, command: list[str]) -> str:
     """Create or respawn an observable atomic Owner worker window."""
-    tmux = require_tmux()
     if not has_session(name):
         result = subprocess.run(
-            [tmux, "new-session", "-d", "-s", name, "-n", window, "-c", str(cwd), shlex.join(command)],
+            server_command(
+                name,
+                "new-session",
+                "-d",
+                "-s",
+                name,
+                "-n",
+                window,
+                "-c",
+                str(cwd),
+                shlex.join(command),
+            ),
             capture_output=True,
             text=True,
             check=False,
         )
         if result.returncode:
             raise WorkspaceError(result.stderr.strip() or "failed to create Owner yard")
-        subprocess.run([tmux, "set-option", "-t", name, "remain-on-exit", "on"], check=False)
+        subprocess.run(
+            server_command(name, "set-option", "-t", name, "remain-on-exit", "on"),
+            check=False,
+        )
         return f"{name}:{window}"
     windows = subprocess.run(
-        [tmux, "list-windows", "-t", name, "-F", "#{window_name}:#{pane_dead}"],
+        server_command(name, "list-windows", "-t", name, "-F", "#{window_name}:#{pane_dead}"),
         capture_output=True,
         text=True,
         check=False,
@@ -124,7 +161,16 @@ def ensure_owner_target(name: str, window: str, cwd: Path, command: list[str]) -
         ensure_window(name, window, cwd, command)
     elif states[window] == "1":
         result = subprocess.run(
-            [tmux, "respawn-window", "-k", "-t", target, "-c", str(cwd), shlex.join(command)],
+            server_command(
+                target,
+                "respawn-window",
+                "-k",
+                "-t",
+                target,
+                "-c",
+                str(cwd),
+                shlex.join(command),
+            ),
             capture_output=True,
             text=True,
             check=False,

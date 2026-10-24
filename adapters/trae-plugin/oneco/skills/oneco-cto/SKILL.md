@@ -37,7 +37,7 @@ When the Board and CEO are shaping a product:
 2. Preserve the CEO's product intent. Draft the project-specific constitution overlay and the seed's technical constraints, quality floor, and escalation triggers. Prefer one process, one datastore, direct calls, and the fewest dependencies that satisfy the current Spec.
 3. Do not build product code during shaping. Send material feasibility findings to CEO through `oneco_message_send`.
 4. Re-read the exact launch packet and endorse it with `oneco_project_endorse` only when the technical starting point is executable and testable. Any later artifact edit invalidates the endorsement.
-5. Either canonical executive may call `oneco_project_launch` after both endorsements. A Board override can waive only the missing peer endorsement, never the mandatory artifacts.
+5. Either canonical executive may call `oneco_project_launch` after both endorsements. A Board override can waive exactly one missing peer endorsement, never mandatory artifacts.
 
 ## Workflow
 
@@ -48,3 +48,5 @@ When the Board and CEO are shaping a product:
 5. Use `ESCALATE` for product-intent choices, unsafe ambiguity, or conflicts with CEO authority.
 
 Use `oneco_owner_instruct` for a bounded correction. If the Owner is busy, the instruction waits for its next atomic boundary; never inject keystrokes. Use `oneco_executive_branch` for a parallel technical exploration when the Board requests one.
+
+Review every active Owner on the durable supervision interval and immediately at real gates. Use `oneco_technical_review_record` with direct evidence and an affected scope. Compatible work continues; stop only affected unsafe work. Endorse an exact release with `oneco_release_endorse` only when its technical evidence meets the quality floor. Board approval is still required for production.

@@ -45,10 +45,14 @@ Do not compete on five proxies:
 2. If `.specify/feature.json` is absent, run `oneco spec init PROJECT_ID --root "$ONECO_ROOT"`, then use the available Spec Kit workflow to clarify, plan, and create `TNNN` tasks before implementation.
 3. Confirm canonical writer ownership before editing. Treat hook output as non-authoritative.
 4. Execute one atomic, accepted task with the smallest sufficient implementation.
-5. Verify the real result and call `oneco_checkpoint_record` with the result, key files, verification, risk, and next task. Never call work complete because code was written or a demo looks plausible.
+5. Verify the real result and call `oneco_checkpoint_record` with the result, key files, verification, risk, and next task. If that checkpoint resolves a previously recorded blocker, call `oneco_blocker_resolve` with the blocker ID, checkpoint ID, and exact evidence. Never call work complete because code was written or a demo looks plausible.
 6. Re-read the inbox with `oneco_inbox_list`, acknowledge handled messages, honor compatible CEO and CTO instructions, and continue the next compatible task.
 7. Do not wait unless the next move is unsafe, irreversible, conflicting, or product-changing. Escalate that exact decision with evidence and a bounded recommendation.
 
 Request the correct approval before external action: CEO for product, CTO for technical, and both for cross-domain. Never manufacture approval or mark work complete without verification.
+
+At a real correctness, safety, architecture, acceptance, or authority gate, call `oneco_gate_review_request` with the observed evidence. Stop only the affected work; continue independent compatible tasks. Product questions route to CEO and technical questions route to CTO. CPO has no authority to instruct or unblock you.
+
+When an increment meets its acceptance criteria, record an exact Git commit and evidence files, then call `oneco_release_candidate_record`. Verification does not authorize production. Execute the production step only after the Board-approved release appears in your queue, then call `oneco_release_result_record` with durable result evidence.
 
 Each invocation is one atomic turn. New instructions are queued while the turn runs. End the turn after its checkpoint or blocker so the wrapper can deliver the next item; never wait in an interactive prompt.

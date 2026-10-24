@@ -22,8 +22,16 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
-from .adapters import tmux, trae
-from .errors import OneCoError, ProjectError, WorkspaceError
+from .adapters import ghostty, tmux, trae
+from .company_services import (
+    board_decide_bet,
+    board_decide_release,
+    configure_supervision,
+    list_bets,
+    list_signals,
+    record_signal,
+)
+from .errors import AuthorizationError, OneCoError, ProjectError, WorkspaceError
 from .launcher import create_launcher as create_finder_launcher
 from .models import Instruction, InstructionAction, ProjectState, WorkState
 from .services import (
@@ -51,12 +59,17 @@ app = typer.Typer(
 )
 company_app = typer.Typer(help="Create and inspect a company workspace.")
 project_app = typer.Typer(help="Register and govern product projects.")
+signal_app = typer.Typer(help="Capture Board-assigned market Signals.")
+bet_app = typer.Typer(help="Inspect Product Bets and record human Board decisions.")
+release_app = typer.Typer(help="Inspect release candidates and record Board decisions.")
+supervision_app = typer.Typer(help="Configure CTO supervision policy.")
 message_app = typer.Typer(help="Send durable coordination messages.")
 session_app = typer.Typer(help="Manage fenced logical-role sessions.")
 checkpoint_app = typer.Typer(help="Record durable Owner checkpoints.")
 decision_app = typer.Typer(help="Record durable company decisions.")
 action_app = typer.Typer(help="Request and decide approval-gated external actions.")
 runtime_app = typer.Typer(help="Inspect or rebuild disposable runtime state.")
+work_app = typer.Typer(help="Recover and inspect durable Owner work items.")
 host_app = typer.Typer(help="Install local host integrations.")
 spec_app = typer.Typer(help="Manage the local OneCo Spec Kit workflow.")
 mcp_app = typer.Typer(help="Expose authorized OneCo operations to agent hosts.")
@@ -65,12 +78,17 @@ internal_hook_app = typer.Typer(help="Internal lifecycle observations.", hidden=
 
 app.add_typer(company_app, name="company")
 app.add_typer(project_app, name="project")
+app.add_typer(signal_app, name="signal")
+app.add_typer(bet_app, name="bet")
+app.add_typer(release_app, name="release")
+app.add_typer(supervision_app, name="supervision")
 app.add_typer(message_app, name="message")
 app.add_typer(session_app, name="session")
 app.add_typer(checkpoint_app, name="checkpoint")
 app.add_typer(decision_app, name="decision")
 app.add_typer(action_app, name="action")
 app.add_typer(runtime_app, name="runtime")
+app.add_typer(work_app, name="work")
 app.add_typer(host_app, name="host")
 app.add_typer(spec_app, name="spec")
 app.add_typer(mcp_app, name="mcp")
@@ -102,6 +120,14 @@ def _guard(function: Callable[P, R]) -> Callable[P, R]:
 
 def _workspace(root: Path | None = None) -> Workspace:
     return Workspace.open(root.resolve() if root else company_root())
+
+
+def _require_human_control_plane() -> None:
+    """Keep launched role agents on the session-fenced MCP authority surface."""
+    if os.environ.get("ONECO_SESSION_ID") or os.environ.get("ONECO_IDENTITY"):
+        raise AuthorizationError(
+            "OneCo role agents cannot use the human CLI control plane; use OneCo MCP tools"
+        )
 
 
 def _jsonable(value: Any) -> Any:
@@ -145,6 +171,8 @@ def _status_payload(workspace: Workspace) -> dict[str, Any]:
     return {
         "company": manifest.company_name,
         "root": str(workspace.root),
+        "signals": list_signals(workspace),
+        "bets": list_bets(workspace),
         "projects": projects,
         "identities": snapshot["identities"],
         "unread": snapshot["unread"],
@@ -173,6 +201,7 @@ def _print_status(payload: dict[str, Any]) -> None:
         )
     console.print(identities)
     console.print(
+        f"Signals: {len(payload['signals'])}  Bets: {len(payload['bets'])}  "
         f"Unread: {payload['unread']}  Pending actions: {len(payload['pending_actions'])}"
     )
 
@@ -184,20 +213,20 @@ def _project_id_from_owner(logical_id: str) -> str | None:
 
 def _role_cwd(workspace: Workspace, logical_id: str) -> Path:
     project_id = _project_id_from_owner(logical_id)
-    if logical_id in {"CEO", "CTO"}:
+    if logical_id in {"CPO", "CEO", "CTO"}:
         return workspace.root
     if project_id:
         return workspace.project_path(project_id)
-    raise WorkspaceError("identity must be CEO, CTO, or PROJ-NNN:owner")
+    raise WorkspaceError("identity must be CPO, CEO, CTO, or PROJ-NNN:owner")
 
 
 def _role_window(logical_id: str) -> str:
-    if logical_id in {"CEO", "CTO"}:
+    if logical_id in {"CPO", "CEO", "CTO"}:
         return logical_id.lower()
     project_id = _project_id_from_owner(logical_id)
     if project_id:
         return project_id.lower()
-    raise WorkspaceError("identity must be CEO, CTO, or PROJ-NNN:owner")
+    raise WorkspaceError("identity must be CPO, CEO, CTO, or PROJ-NNN:owner")
 
 
 def _role_run_command(
@@ -218,14 +247,16 @@ def _role_run_command(
     ]
 
 
-def _ensure_company_session(workspace: Workspace, permission: str = "default") -> str:
+def _ensure_company_session(
+    workspace: Workspace, permission: str = trae.DEFAULT_PERMISSION_MODE
+) -> str:
     manifest = workspace.manifest()
     if manifest.provider != "trae":
         raise WorkspaceError(f"unsupported launch provider: {manifest.provider}")
     trae.require_model(manifest.model)
     name = tmux.session_name(manifest.company_name)
     tmux.ensure_session(name, workspace.root)
-    for identity in ("CEO", "CTO"):
+    for identity in ("CPO", "CEO", "CTO"):
         window = _role_window(identity)
         target = f"{name}:{window}"
         tmux.ensure_window(
@@ -240,13 +271,15 @@ def _ensure_company_session(workspace: Workspace, permission: str = "default") -
 def _focus(target: str) -> None:
     if os.environ.get("TMUX"):
         result = subprocess.run(
-            [tmux.require_tmux(), "select-window", "-t", target],
+            tmux.server_command(target, "select-window", "-t", target),
             capture_output=True,
             text=True,
             check=False,
         )
     else:
-        result = subprocess.run([tmux.require_tmux(), "attach-session", "-t", target], check=False)
+        result = subprocess.run(
+            tmux.server_command(target, "attach-session", "-t", target), check=False
+        )
     if result.returncode:
         error = getattr(result, "stderr", "")
         raise WorkspaceError((error or f"failed to focus {target}").strip())
@@ -269,9 +302,7 @@ def _trae_plugin_command() -> list[str]:
 
 
 def _install_trae_plugin() -> str:
-    result = subprocess.run(
-        _trae_plugin_command(), capture_output=True, text=True, check=False
-    )
+    result = subprocess.run(_trae_plugin_command(), capture_output=True, text=True, check=False)
     if result.returncode:
         raise WorkspaceError(result.stderr.strip() or "Trae plugin installation failed")
     return result.stdout.strip() or "Trae OneCo plugin installed"
@@ -280,7 +311,9 @@ def _install_trae_plugin() -> str:
 @app.command("create")
 @_guard
 def create(
-    path: Path | None = typer.Argument(None, help="Company folder. Asked interactively if omitted."),
+    path: Path | None = typer.Argument(
+        None, help="Company folder. Asked interactively if omitted."
+    ),
     name: str | None = typer.Option(None, "--name", help="Company name."),
     language: str = typer.Option("en", "--language"),
     model: str = typer.Option(trae.DEFAULT_MODEL, "--model"),
@@ -290,6 +323,7 @@ def create(
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Create a complete local company in one guided step."""
+    _require_human_control_plane()
     from .util import slugify
 
     company_name = (name or typer.prompt("Company name")).strip()
@@ -344,6 +378,7 @@ def company_init(
     git_init: bool = typer.Option(True, "--git-init/--no-git-init"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    _require_human_control_plane()
     workspace = Workspace.initialize(
         path,
         name,
@@ -372,6 +407,112 @@ def company_show(
     )
 
 
+@signal_app.command("add")
+@_guard
+def signal_add(
+    title: str = typer.Option(..., "--title"),
+    summary: str = typer.Option(..., "--summary"),
+    source_kind: str = typer.Option("board_idea", "--source-kind"),
+    source_title: str = typer.Option("Board direction", "--source-title"),
+    source_uri: str | None = typer.Option(None, "--source-uri"),
+    root: Path | None = typer.Option(None, "--root"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _require_human_control_plane()
+    """Assign one traceable Signal to the CPO; this is a human Board action."""
+    signal = record_signal(
+        _workspace(root),
+        title,
+        summary,
+        [{"kind": source_kind, "title": source_title, "uri": source_uri}],
+    )
+    _emit(signal, json_output=json_output)
+
+
+@signal_app.command("list")
+@_guard
+def signal_list(
+    root: Path | None = typer.Option(None, "--root"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _emit(list_signals(_workspace(root)), json_output=json_output)
+
+
+@bet_app.command("list")
+@_guard
+def bet_list(
+    root: Path | None = typer.Option(None, "--root"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _emit(list_bets(_workspace(root)), json_output=json_output)
+
+
+@bet_app.command("decide")
+@_guard
+def bet_decide(
+    bet_id: str = typer.Argument(...),
+    revision: int = typer.Option(..., "--revision"),
+    digest: str = typer.Option(..., "--digest"),
+    decision: str = typer.Option(..., "--decision", help="select, reject, or more_evidence"),
+    reason: str = typer.Option(..., "--reason"),
+    evidence_gap: str | None = typer.Option(None, "--evidence-gap"),
+    root: Path | None = typer.Option(None, "--root"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Bind a human Board decision to one exact submitted Bet digest."""
+    _require_human_control_plane()
+    record = board_decide_bet(
+        _workspace(root),
+        bet_id,
+        revision,
+        digest,
+        decision,
+        reason,
+        evidence_gap=evidence_gap,
+        provider_thread_id="oneco-cli",
+        provider_turn_id=f"cli_{uuid.uuid4().hex}",
+    )
+    _emit(record, json_output=json_output)
+
+
+@release_app.command("decide")
+@_guard
+def release_decide(
+    release_id: str = typer.Argument(...),
+    decision: str = typer.Option(..., "--decision", help="approve or reject"),
+    reason: str = typer.Option(..., "--reason"),
+    root: Path | None = typer.Option(None, "--root"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Approve or reject one exact release candidate as the human Board."""
+    _require_human_control_plane()
+    record = board_decide_release(
+        _workspace(root),
+        release_id,
+        decision,
+        reason,
+        provider_thread_id="oneco-cli",
+        provider_turn_id=f"cli_{uuid.uuid4().hex}",
+    )
+    _emit(record, json_output=json_output)
+
+
+@supervision_app.command("set")
+@_guard
+def supervision_set(
+    interval_minutes: int = typer.Option(..., "--interval-minutes", min=15),
+    reason: str = typer.Option(..., "--reason"),
+    root: Path | None = typer.Option(None, "--root"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _require_human_control_plane()
+    """Set the durable CTO review interval as the human Board."""
+    policy = configure_supervision(
+        _workspace(root), interval_minutes, changed_by="BOARD", reason=reason
+    )
+    _emit(policy, json_output=json_output)
+
+
 @project_app.command("register")
 @_guard
 def project_register(
@@ -382,10 +523,10 @@ def project_register(
     scaffold: bool = typer.Option(True, "--scaffold/--no-scaffold"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    project = _workspace(root).register_project(
-        name, path, initialize_git=initialize_git, scaffold=scaffold
+    _ = name, path, root, initialize_git, scaffold, json_output
+    raise ProjectError(
+        "direct project registration is disabled in OneCo v1; the CEO must promote a Board-selected Bet"
     )
-    _emit(project, json_output=json_output)
 
 
 @project_app.command("list")
@@ -444,10 +585,9 @@ def project_endorse(
     note: str = typer.Option(..., "--note"),
     root: Path | None = typer.Option(None, "--root"),
 ) -> None:
-    workspace = _workspace(root)
-    path = workspace.endorse_launch(project_id, actor, note)
-    project = workspace.find_project(project_id)
-    _emit({"project_id": project_id, "actor": actor.upper(), "state": project.state, "path": path})
+    _require_human_control_plane()
+    _ = project_id, actor, note, root
+    raise ProjectError("launch endorsement must come from the active CEO or CTO session")
 
 
 @project_app.command("activate")
@@ -458,10 +598,9 @@ def project_activate(
     root: Path | None = typer.Option(None, "--root"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    _emit(
-        _workspace(root).set_state(project_id, ProjectState.ACTIVE, actor=actor),
-        json_output=json_output,
-    )
+    _require_human_control_plane()
+    _ = project_id, actor, root, json_output
+    raise ProjectError("direct activation is disabled; use the digest-bound role launch tool")
 
 
 @project_app.command("archive")
@@ -472,6 +611,7 @@ def project_archive(
     root: Path | None = typer.Option(None, "--root"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    _require_human_control_plane()
     _emit(
         _workspace(root).set_state(project_id, ProjectState.ARCHIVED, actor=actor),
         json_output=json_output,
@@ -487,6 +627,9 @@ def project_set_state(
     root: Path | None = typer.Option(None, "--root"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    _require_human_control_plane()
+    if state == ProjectState.ACTIVE:
+        raise ProjectError("direct activation is disabled; use the digest-bound role launch tool")
     _emit(_workspace(root).set_state(project_id, state, actor=actor), json_output=json_output)
 
 
@@ -512,6 +655,7 @@ def message_send(
     idempotency_key: str | None = typer.Option(None, "--idempotency-key"),
     root: Path | None = typer.Option(None, "--root"),
 ) -> None:
+    _require_human_control_plane()
     workspace = _workspace(root)
     if project_id:
         workspace.find_project(project_id)
@@ -581,6 +725,7 @@ def inbox_ack(
     actor: str = typer.Option(..., "--actor"),
     root: Path | None = typer.Option(None, "--root"),
 ) -> None:
+    _require_human_control_plane()
     _workspace(root).runtime.acknowledge(message_id, actor)
     console.print(f"acknowledged {message_id}")
 
@@ -601,8 +746,8 @@ def _register_session(
     project_id = _project_id_from_owner(logical_id)
     if project_id:
         project = workspace.find_project(project_id)
-        ready, reasons = workspace.readiness(project_id)
-        if project.state != ProjectState.ACTIVE or not ready:
+        if project.state != ProjectState.ACTIVE:
+            _, reasons = workspace.readiness(project_id)
             detail = f"state={project.state}"
             if reasons:
                 detail += "; " + "; ".join(reasons)
@@ -634,6 +779,7 @@ def session_register(
     root: Path | None = typer.Option(None, "--root"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    _require_human_control_plane()
     _register_session(
         logical_id, cwd, provider, provider_session_id, tmux_target, pid, False, root, json_output
     )
@@ -651,6 +797,7 @@ def session_takeover(
     root: Path | None = typer.Option(None, "--root"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    _require_human_control_plane()
     _register_session(
         logical_id, cwd, provider, provider_session_id, tmux_target, pid, True, root, json_output
     )
@@ -664,6 +811,7 @@ def session_close(
     lost: bool = typer.Option(False, "--lost"),
     root: Path | None = typer.Option(None, "--root"),
 ) -> None:
+    _require_human_control_plane()
     _workspace(root).runtime.close_session(session_id, epoch, lost=lost)
     console.print(f"closed {session_id}")
 
@@ -687,20 +835,31 @@ def session_reconcile(
     root: Path | None = typer.Option(None, "--root"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    _require_human_control_plane()
     workspace = _workspace(root)
     now = datetime.now(UTC)
     with workspace.runtime.connect() as connection:
         rows = [
             dict(row)
             for row in connection.execute(
-                "SELECT id, epoch, pid, tmux_target, last_seen_at FROM sessions WHERE lifecycle='live'"
+                """SELECT id, epoch, pid, tmux_target, last_seen_at,
+                terminal_transport, terminal_handle, launch_nonce
+                FROM sessions WHERE lifecycle='live'"""
             )
         ]
     lost: list[str] = []
     for row in rows:
         observable = False
         alive = False
-        if row["pid"] is not None:
+        verified_ghostty_launch = (
+            row["terminal_transport"] == "ghostty" and row["launch_nonce"] is not None
+        )
+        if verified_ghostty_launch:
+            from .orchestrator import executive_session_alive
+
+            observable = True
+            alive = executive_session_alive(row)
+        elif row["pid"] is not None:
             observable = True
             alive = _pid_alive(int(row["pid"]))
         if row["tmux_target"] and shutil.which("tmux"):
@@ -708,22 +867,31 @@ def session_reconcile(
             alive = (
                 alive
                 or subprocess.run(
-                    [
-                        tmux.require_tmux(),
+                    tmux.server_command(
+                        str(row["tmux_target"]),
                         "display-message",
                         "-p",
                         "-t",
-                        row["tmux_target"],
+                        str(row["tmux_target"]),
                         "#{pane_id}",
-                    ],
+                    ),
                     capture_output=True,
                     check=False,
                 ).returncode
                 == 0
             )
+        if (
+            not verified_ghostty_launch
+            and row["terminal_transport"] == "ghostty"
+            and row["terminal_handle"]
+        ):
+            observable = True
+            alive = alive or ghostty.is_alive(str(row["terminal_handle"]))
         age = (now - datetime.fromisoformat(row["last_seen_at"])).total_seconds()
         if not alive and (observable or age >= stale_after):
-            workspace.runtime.close_session(row["id"], int(row["epoch"]), lost=True)
+            # Keep the identity bound to the lost session so an executive or Owner can
+            # resume the exact provider thread instead of silently creating a new one.
+            workspace.runtime.mark_lost(row["id"], int(row["epoch"]))
             lost.append(row["id"])
     _emit({"examined": len(rows), "lost": lost}, json_output=json_output)
 
@@ -750,6 +918,7 @@ def checkpoint_create(
     root: Path | None = typer.Option(None, "--root"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    _require_human_control_plane()
     workspace = _workspace(root)
     checkpoint, path = record_checkpoint(
         workspace,
@@ -792,6 +961,7 @@ def instruct(
     requires_spec_revision: bool = typer.Option(False, "--requires-spec-revision"),
     root: Path | None = typer.Option(None, "--root"),
 ) -> None:
+    _require_human_control_plane()
     instruction = Instruction(
         instruction_id=f"ins_{uuid.uuid4().hex}",
         sender_authority=sender,
@@ -825,6 +995,7 @@ def decision_record(
     project_id: str | None = typer.Option(None, "--project", "--project-id"),
     root: Path | None = typer.Option(None, "--root"),
 ) -> None:
+    _require_human_control_plane()
     path = record_decision(
         _workspace(root), title, decision, rationale, actor=actor, project_id=project_id
     )
@@ -843,6 +1014,7 @@ def action_request(
     root: Path | None = typer.Option(None, "--root"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    _require_human_control_plane()
     action = create_action_request(
         _workspace(root), project_id, requester, domain, summary, effect, reversible
     )
@@ -862,6 +1034,7 @@ def action_approve(
     note: str = typer.Option("", "--note"),
     root: Path | None = typer.Option(None, "--root"),
 ) -> None:
+    _require_human_control_plane()
     _decide(action_id, approver, "approve", note, root)
 
 
@@ -873,6 +1046,7 @@ def action_reject(
     note: str = typer.Option("", "--note"),
     root: Path | None = typer.Option(None, "--root"),
 ) -> None:
+    _require_human_control_plane()
     _decide(action_id, approver, "reject", note, root)
 
 
@@ -882,6 +1056,7 @@ def runtime_rebuild(
     root: Path | None = typer.Option(None, "--root"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    _require_human_control_plane()
     _emit(rebuild_runtime(_workspace(root)), json_output=json_output)
 
 
@@ -894,19 +1069,40 @@ def runtime_snapshot(
     _emit(_workspace(root).runtime.snapshot(), json_output=json_output)
 
 
+@work_app.command("retry")
+@_guard
+def work_retry(
+    work_id: str = typer.Argument(...),
+    root: Path | None = typer.Option(None, "--root"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Requeue one failed Owner item for an explicit human-directed retry."""
+    _require_human_control_plane()
+    result = _workspace(root).runtime.requeue_failed_work(work_id)
+    _emit(result, json_output=json_output)
+
+
 @app.command("start")
 @_guard
 def start(
     root: Path | None = typer.Option(None, "--root"),
     attach: bool = typer.Option(True, "--attach/--no-attach", hidden=True),
-    permission: str = typer.Option("default", "--permission"),
+    permission: str = typer.Option(trae.DEFAULT_PERMISSION_MODE, "--permission"),
     no_executives: bool = typer.Option(False, "--no-executives"),
 ) -> None:
+    _require_human_control_plane()
     workspace = _workspace(root)
-    _ = attach, permission
+    _ = attach
+    from .supervisor import ensure_supervisor
+
+    ensure_supervisor(workspace, permission=permission)
     from .bridge import run_bridge
 
-    run_bridge(workspace, launch_executives=not no_executives)
+    run_bridge(
+        workspace,
+        launch_executives=not no_executives,
+        permission=permission,
+    )
 
 
 @app.command("cockpit")
@@ -914,51 +1110,70 @@ def start(
 def cockpit(
     root: Path | None = typer.Option(None, "--root"),
     no_executives: bool = typer.Option(False, "--no-executives"),
+    permission: str = typer.Option(trae.DEFAULT_PERMISSION_MODE, "--permission"),
 ) -> None:
-    """Open or focus the native OneCo Bridge."""
+    """Open or focus the read-only native OneCo Bridge."""
+    _require_human_control_plane()
+    workspace = _workspace(root)
     from .bridge import run_bridge
 
-    run_bridge(_workspace(root), launch_executives=not no_executives)
+    run_bridge(
+        workspace,
+        launch_executives=not no_executives,
+        permission=permission,
+    )
+
+
+@app.command("stop")
+@_guard
+def stop(root: Path | None = typer.Option(None, "--root")) -> None:
+    """Stop background OneCo supervision; closing Cockpit alone does not stop it."""
+    _require_human_control_plane()
+    from .supervisor import stop_supervisor
+
+    _emit(stop_supervisor(_workspace(root)))
 
 
 @app.command("launch")
 @_guard
 def launch(
-    identity: str = typer.Argument(..., help="CEO, CTO, or an Owner such as PROJ-001:owner."),
+    identity: str = typer.Argument(..., help="CPO, CEO, CTO, or an Owner such as PROJ-001:owner."),
     root: Path | None = typer.Option(None, "--root"),
-    permission: str = typer.Option("default", "--permission"),
+    permission: str = typer.Option(trae.DEFAULT_PERMISSION_MODE, "--permission"),
 ) -> None:
+    _require_human_control_plane()
     workspace = _workspace(root)
-    identity = identity.upper() if identity.upper() in {"CEO", "CTO"} else identity
-    if identity in {"CEO", "CTO"}:
+    identity = identity.upper() if identity.upper() in {"CPO", "CEO", "CTO"} else identity
+    if identity in {"CPO", "CEO", "CTO"}:
         from .orchestrator import focus_executive
 
-        focus_executive(workspace, identity)
+        focus_executive(workspace, identity, permission=permission)
         return
     project_id = _project_id_from_owner(identity)
     if not project_id:
-        raise WorkspaceError("launch identity must be CEO, CTO, or PROJ-NNN:owner")
+        raise WorkspaceError("launch identity must be CPO, CEO, CTO, or PROJ-NNN:owner")
     project = workspace.find_project(project_id)
-    ready, reasons = workspace.readiness(project_id)
     if project.state != ProjectState.ACTIVE:
         raise ProjectError(f"{project_id} is {project.state}; Owner launch requires active")
-    if not ready:
-        raise ProjectError("Owner launch requires readiness: " + "; ".join(reasons))
     from .orchestrator import wake_owner
 
     result = wake_owner(workspace, project_id, permission=permission)
+    if result["status"] == "idle":
+        console.print(f"Owner idle: {identity}; no queued work")
+        return
     console.print(f"Owner ready: {result['tmux_target']}")
 
 
 @app.command("talk")
 @_guard
 def talk(
-    role: str = typer.Argument(..., help="CEO or CTO."),
+    role: str = typer.Argument(..., help="CPO, CEO, or CTO."),
     root: Path | None = typer.Option(None, "--root"),
 ) -> None:
+    _require_human_control_plane()
     role = role.upper()
-    if role not in {"CEO", "CTO"}:
-        raise WorkspaceError("talk role must be CEO or CTO")
+    if role not in {"CPO", "CEO", "CTO"}:
+        raise WorkspaceError("talk role must be CPO, CEO, or CTO")
     from .orchestrator import focus_executive
 
     focus_executive(_workspace(root), role)
@@ -967,7 +1182,7 @@ def talk(
 @app.command("branch")
 @_guard
 def branch(
-    role: str = typer.Argument(..., help="CEO or CTO."),
+    role: str = typer.Argument(..., help="CPO, CEO, or CTO."),
     purpose: str = typer.Option(..., "--purpose", help="Short title for the parallel discussion."),
     recovery_candidate: bool = typer.Option(
         False, "--recovery-candidate", help="Create a fenced succession candidate."
@@ -975,16 +1190,13 @@ def branch(
     root: Path | None = typer.Option(None, "--root"),
 ) -> None:
     """Fork an executive's exact Trae context into a titled advisory window."""
+    _require_human_control_plane()
     role = role.upper()
-    if role not in {"CEO", "CTO"}:
-        raise WorkspaceError("branch role must be CEO or CTO")
+    if role not in {"CPO", "CEO", "CTO"}:
+        raise WorkspaceError("branch role must be CPO, CEO, or CTO")
     from .orchestrator import branch_executive
 
-    _emit(
-        branch_executive(
-            _workspace(root), role, purpose, candidate=recovery_candidate
-        )
-    )
+    _emit(branch_executive(_workspace(root), role, purpose, candidate=recovery_candidate))
 
 
 @app.command("create-launcher")
@@ -994,6 +1206,7 @@ def create_launcher_command(
     destination: Path | None = typer.Option(None, "--destination"),
 ) -> None:
     """Create or refresh this company's Finder launcher."""
+    _require_human_control_plane()
     path = create_finder_launcher(
         _workspace(root), destination.expanduser() if destination else None
     )
@@ -1006,10 +1219,11 @@ def open_project(
     project_id: str = typer.Argument(...),
     root: Path | None = typer.Option(None, "--root"),
 ) -> None:
+    _require_human_control_plane()
     workspace = _workspace(root)
     project = workspace.find_project(project_id)
-    ready, reasons = workspace.readiness(project_id)
-    if project.state != ProjectState.ACTIVE or not ready:
+    if project.state != ProjectState.ACTIVE:
+        _, reasons = workspace.readiness(project_id)
         detail = f"state={project.state}"
         if reasons:
             detail += "; " + "; ".join(reasons)
@@ -1026,6 +1240,7 @@ def board(
     root: Path | None = typer.Option(None, "--root"),
     once: bool = typer.Option(False, "--once", help="Print once without the interactive prompt."),
 ) -> None:
+    _require_human_control_plane()
     workspace = _workspace(root)
     while True:
         console.clear() if sys.stdin.isatty() and not once else None
@@ -1043,7 +1258,7 @@ def board(
         elif len(words) == 2 and words[0] == "open":
             open_project(project_id=words[1], root=workspace.root)
         else:
-            console.print("Commands: refresh, talk CEO|CTO, open PROJ-NNN, quit")
+            console.print("Commands: refresh, talk CPO|CEO|CTO, open PROJ-NNN, quit")
 
 
 @app.command("role-run", hidden=True)
@@ -1052,15 +1267,17 @@ def role_run(
     identity: str = typer.Argument(...),
     root: Path = typer.Option(..., "--root"),
     model: str = typer.Option(trae.DEFAULT_MODEL, "--model"),
-    permission: str = typer.Option("default", "--permission"),
+    permission: str = typer.Option(trae.DEFAULT_PERMISSION_MODE, "--permission"),
     tmux_target: str | None = typer.Option(None, "--tmux-target"),
 ) -> None:
+    _require_human_control_plane()
+    permission = trae.unattended_permission_mode(permission)
     workspace = _workspace(root)
     project_id = _project_id_from_owner(identity)
     if project_id:
         project = workspace.find_project(project_id)
-        ready, reasons = workspace.readiness(project_id)
-        if project.state != ProjectState.ACTIVE or not ready:
+        if project.state != ProjectState.ACTIVE:
+            _, reasons = workspace.readiness(project_id)
             raise ProjectError(
                 f"Owner launch requires ready+active: state={project.state}; {'; '.join(reasons)}"
             )
@@ -1072,23 +1289,24 @@ def role_run(
         workspace.runtime.acquire_writer(project_id, session["session_id"], int(session["epoch"]))
     binary = trae.require_model(model)
     prompt = trae.role_prompt(identity, workspace.root, cwd if project_id else None)
-    environment = os.environ.copy()
-    environment.update(
+    environment = trae.managed_environment(
         {
-            "ONECO_ROOT": str(workspace.root),
+            "ONECO_ROOT": workspace.root,
             "ONECO_IDENTITY": identity,
             "ONECO_SESSION_ID": session["session_id"],
-            "ONECO_EPOCH": str(session["epoch"]),
+            "ONECO_EPOCH": session["epoch"],
         }
     )
     argv = [
         str(binary),
+        *trae.isolated_config_argv(cwd),
+        "--no-daemon",
+        "--dangerously-bypass-hook-trust",
         "--cd",
         str(cwd),
         "--model",
         model,
-        "--permission-mode",
-        permission,
+        *trae.permission_argv(permission),
         prompt,
     ]
     os.execvpe(str(binary), argv, environment)
@@ -1102,10 +1320,11 @@ def executive_run(
     session_id: str = typer.Option(..., "--session-id"),
     epoch: int = typer.Option(..., "--epoch"),
     model: str = typer.Option(trae.DEFAULT_MODEL, "--model"),
-    permission: str = typer.Option("default", "--permission"),
+    permission: str = typer.Option(trae.DEFAULT_PERMISSION_MODE, "--permission"),
     resume: str | None = typer.Option(None, "--resume"),
     fork_from: str | None = typer.Option(None, "--fork-from"),
     advisory_prompt: str | None = typer.Option(None, "--advisory-prompt"),
+    launch_nonce: str | None = typer.Option(None, "--launch-nonce"),
 ) -> None:
     from .orchestrator import run_executive
 
@@ -1119,6 +1338,7 @@ def executive_run(
         resume=resume,
         fork_from=fork_from,
         advisory_prompt=advisory_prompt,
+        launch_nonce=launch_nonce,
     )
 
 
@@ -1129,14 +1349,12 @@ def owner_turn(
     root: Path = typer.Option(..., "--root"),
     session_id: str = typer.Option(..., "--session-id"),
     epoch: int = typer.Option(..., "--epoch"),
-    permission: str = typer.Option("default", "--permission"),
+    permission: str = typer.Option(trae.DEFAULT_PERMISSION_MODE, "--permission"),
 ) -> None:
     from .orchestrator import run_owner_turn
 
     raise typer.Exit(
-        run_owner_turn(
-            _workspace(root), project_id, session_id, epoch, permission=permission
-        )
+        run_owner_turn(_workspace(root), project_id, session_id, epoch, permission=permission)
     )
 
 
@@ -1145,11 +1363,23 @@ def owner_turn(
 def owner_wake(
     project_id: str = typer.Argument(...),
     root: Path = typer.Option(..., "--root"),
-    permission: str = typer.Option("default", "--permission"),
+    permission: str = typer.Option(trae.DEFAULT_PERMISSION_MODE, "--permission"),
 ) -> None:
+    _require_human_control_plane()
     from .orchestrator import wake_owner
 
     _emit(wake_owner(_workspace(root), project_id, permission=permission), json_output=True)
+
+
+@internal_app.command("supervisor-run", hidden=True)
+@_guard
+def supervisor_run(
+    root: Path = typer.Option(..., "--root"),
+    permission: str = typer.Option(trae.DEFAULT_PERMISSION_MODE, "--permission"),
+) -> None:
+    from .supervisor import run_supervisor
+
+    run_supervisor(_workspace(root), permission=permission)
 
 
 @mcp_app.command("serve")
@@ -1177,6 +1407,7 @@ def host_install_trae(
     preview: bool = typer.Option(False, "--preview"),
     yes: bool = typer.Option(False, "--yes"),
 ) -> None:
+    _require_human_control_plane()
     if preview and yes:
         raise WorkspaceError("choose either --preview or --yes")
     command = _trae_plugin_command()
@@ -1224,7 +1455,11 @@ def spec_init(
         text=True,
         check=False,
     )
-    if result.returncode:
+    preset_output = "\n".join((result.stdout, result.stderr))
+    already_installed = re.search(
+        r"Preset ['\"]oneco-lean['\"] is already installed\b", preset_output
+    )
+    if result.returncode and not already_installed:
         raise WorkspaceError(
             result.stderr.strip()
             or result.stdout.strip()
@@ -1296,7 +1531,7 @@ def spec_validate(
     tasks = feature / "tasks.md"
     if tasks.is_file():
         identifiers = re.findall(
-            r"^- \[ [ xX]\] (T[0-9]{3})\b", tasks.read_text(encoding="utf-8"), re.MULTILINE
+            r"^- \[[ xX]\] (T[0-9]{3})\b", tasks.read_text(encoding="utf-8"), re.MULTILINE
         )
         if not identifiers:
             errors.append("tasks.md has no TNNN tasks")
@@ -1319,7 +1554,17 @@ def doctor(
     def add(name: str, ok: bool, detail: str, required: bool = True) -> None:
         checks.append({"name": name, "ok": ok, "required": required, "detail": detail})
 
-    add("python", sys.version_info >= (3, 11), sys.version.split()[0])
+    python_version = sys.version.split()[0]
+    python_supported = sys.version_info[:2] == (3, 11)
+    add(
+        "python",
+        python_supported,
+        (
+            python_version
+            if python_supported
+            else f"{python_version}; OneCo v1 requires Python 3.11"
+        ),
+    )
     for executable in ("git", "tmux"):
         found = shutil.which(executable)
         add(executable, bool(found), found or "not found")
@@ -1408,14 +1653,14 @@ def _handle_hook(event_name: str, payload: dict[str, Any] | None = None) -> None
     identity = str(active["logical_id"])
     normalized = event_name.lower()
     payload = payload or {}
-    provider_session_id = _payload_value(payload, "session_id", "sessionId", "thread_id", "threadId")
+    provider_session_id = _payload_value(
+        payload, "session_id", "sessionId", "thread_id", "threadId"
+    )
     provider_turn_id = _payload_value(payload, "turn_id", "turnId")
     cwd = _payload_value(payload, "cwd")
     prompt = _payload_value(payload, "prompt", "user_prompt", "userPrompt", "input")
     if provider_session_id:
-        workspace.runtime.bind_provider_session(
-            session_id, epoch, provider_session_id, cwd=cwd
-        )
+        workspace.runtime.bind_provider_session(session_id, epoch, provider_session_id, cwd=cwd)
     if normalized == "userpromptsubmit":
         workspace.runtime.touch(session_id, epoch, WorkState.WORKING)
         if provider_session_id and provider_turn_id and prompt:

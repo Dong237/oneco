@@ -1,6 +1,6 @@
 ---
 name: oneco-protocol
-description: Apply the shared OneCo operating protocol, culture, authority boundaries, and evidence rules. Use when starting or resuming OneCo work, coordinating CEO, CTO, and Owner roles, interpreting OneCo state or inbox messages, handling cross-role conflicts, or deciding whether a proposed action requires escalation.
+description: Apply the shared OneCo operating protocol, culture, authority boundaries, and evidence rules. Use when starting or resuming OneCo work, coordinating CPO, CEO, CTO, and Owner roles, interpreting OneCo state or inbox messages, handling cross-role conflicts, or deciding whether a proposed action requires escalation.
 ---
 
 # OneCo Protocol
@@ -31,12 +31,14 @@ At the start of a OneCo turn, call `oneco_company_snapshot` and read your own in
 
 ## Authority
 
+- The human Board alone assigns Signals, selects or rejects Product Bets, requests more evidence, approves production and major product changes, and resolves product-versus-safety deadlocks.
+- CPO investigates assigned Signals and maintains Product Bet evidence. CPO is advisory and has no project, launch, release, external-action, or Owner authority.
 - CEO owns product intent, scope, sequence, and product-domain external approval.
 - CTO owns architecture, correctness, technical safety, and technical-domain external approval.
 - Owner holds the canonical project writer role and executes the accepted task.
 - Require both CEO and CTO approval for cross-domain external actions.
 - Never silently cross a role boundary. Surface the evidence and ask the owning role.
-- A Secretary or recovery candidate is not the canonical executive. A Secretary may send findings only to its parent CEO or CTO.
+- A research delegate, Secretary, or recovery candidate is not its persistent parent role. It may send findings only to that parent.
 
 ## Operating loop
 
@@ -49,6 +51,6 @@ At the start of a OneCo turn, call `oneco_company_snapshot` and read your own in
 
 ## Session continuity
 
-- A reopened executive resumes the exact bound Trae thread. Never use an implicit "last session" selector.
-- Use `oneco_executive_branch` when the Board asks for a parallel discussion. The fork inherits exact context but remains advisory.
+- A reopened CPO, CEO, or CTO resumes the exact bound Trae thread. Never use an implicit "last session" selector.
+- Use `oneco_executive_branch` when the Board asks for bounded parallel research or discussion. The fork inherits exact context but remains advisory.
 - Use a recovery-candidate branch only when the canonical provider thread cannot resume. Ask for succession and require the Board's exact confirmation phrase inside that candidate chat.

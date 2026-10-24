@@ -1,7 +1,7 @@
 {
   "name": "oneco",
-  "version": "0.2.0",
-  "description": "Operate TraeCode sessions as bounded OneCo CEO, CTO, and Owner roles.",
+  "version": "1.0.0",
+  "description": "Operate a durable Signal-to-product company with bounded CPO, CEO, CTO, and Owner roles.",
   "author": {
     "name": "Dong237",
     "email": "youxiang.dong@outlook.com"
@@ -17,7 +17,7 @@
   "interface": {
     "displayName": "OneCo",
     "shortDescription": "Bounded company roles and local-first coordination",
-    "longDescription": "Apply the OneCo operating protocol in TraeCode through shared culture rules and explicit CEO, CTO, and Owner authority boundaries. Lifecycle hooks report observations to the oneco CLI on a best-effort basis.",
+    "longDescription": "Apply the OneCo operating protocol through an advisory CPO, peer CEO and CTO shaping, one canonical Owner per product, human Board decisions, and Git-backed evidence. Lifecycle hooks report observations on a best-effort basis.",
     "developerName": "Dong237",
     "category": "Productivity",
     "capabilities": [
@@ -26,8 +26,8 @@
     ],
     "defaultPrompt": [
       "Orient me to this OneCo role and its current decisions.",
-      "Shape a product with the Board and the other executive.",
-      "Review live work and make the smallest useful correction."
+      "Turn an assigned market Signal into a Product Bet.",
+      "Shape and review the smallest verified product increment."
     ],
     "brandColor": "#111827"
   }

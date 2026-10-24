@@ -36,6 +36,7 @@ def test_initialize_builds_openable_company_without_overwriting_existing_files(
     assert workspace.runtime.database.is_file()
     assert (root / "COMPANY.md").is_file()
     assert {path.name for path in (root / "roles").iterdir()} == {
+        "CPO.md",
         "CEO.md",
         "CTO.md",
         "OWNER.md",
@@ -146,6 +147,31 @@ def test_readiness_and_activation_require_complete_artifacts_and_board_authority
         workspace.set_state(project.id, ProjectState.ACTIVE, actor="CEO")
     with pytest.raises(ProjectError, match="project is not ready"):
         workspace.set_state(project.id, ProjectState.ACTIVE, actor="BOARD")
+
+
+def test_launch_override_cannot_bypass_full_readiness(workspace: Workspace) -> None:
+    project = workspace.register_project("Alpha", Path("alpha"), initialize_git=False)
+    project_root = workspace.project_path(project.id)
+    for relative in (
+        "BRIEF.md",
+        ".specify/memory/constitution.md",
+        "spec-seeds/001-first-vertical.md",
+    ):
+        path = project_root / relative
+        path.write_text(
+            path.read_text(encoding="utf-8")
+            .replace("TBD", "Defined")
+            .replace("DRAFT —", "READY —"),
+            encoding="utf-8",
+        )
+    (project_root / "AGENTS.md").unlink()
+
+    with pytest.raises(ProjectError, match="project is not ready"):
+        workspace.activate_from_launch(
+            project.id,
+            actor="CEO",
+            board_override_turn_id="turn-board-waiver",
+        )
 
 
 def test_board_activation_updates_portfolio_and_project_record(

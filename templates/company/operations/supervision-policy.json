@@ -1,0 +1,6 @@
+{
+  "interval_minutes": 240,
+  "progress_pulse_target_minutes": 15,
+  "changed_by": "BOARD",
+  "reason": "OneCo v1 default"
+}

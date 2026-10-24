@@ -146,7 +146,11 @@ def test_rebuild_runtime_restores_derived_indexes_and_messages_from_durable_file
 
     counts = rebuild_runtime(workspace)
 
-    assert counts == {"checkpoints": 1, "instructions": 1, "actions": 1}
+    assert {key: counts[key] for key in ("checkpoints", "instructions", "actions")} == {
+        "checkpoints": 1,
+        "instructions": 1,
+        "actions": 1,
+    }
     assert all(path.read_bytes() == content for path, content in durable_before.items())
     with workspace.runtime.connect() as connection:
         assert connection.execute("SELECT count(*) FROM checkpoint_index").fetchone()[0] == 1

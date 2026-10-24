@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oneco:schema:blocker:1",
+  "title": "OneCo Owner blocker",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "blocker_id",
+    "project_id",
+    "reported_by",
+    "recorded_session_id",
+    "recorded_epoch",
+    "summary",
+    "evidence",
+    "requested_decision",
+    "status",
+    "created_at"
+  ],
+  "properties": {
+    "blocker_id": {"type": "string", "minLength": 1},
+    "project_id": {"type": "string", "pattern": "^PROJ-[0-9]{3,}$"},
+    "reported_by": {"type": "string", "minLength": 1},
+    "recorded_session_id": {"type": ["string", "null"], "minLength": 1},
+    "recorded_epoch": {"type": ["integer", "null"], "minimum": 1},
+    "summary": {"type": "string", "minLength": 1},
+    "evidence": {"type": "string", "minLength": 1},
+    "requested_decision": {"type": "string", "minLength": 1},
+    "status": {"enum": ["open", "resolved"]},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

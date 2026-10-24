@@ -1,55 +1,62 @@
 # Operating protocol
 
-## Roles
+## Roles and capabilities
 
-- **Board:** company direction, product idea approval, material product or architecture changes, sensitive external commitments, production launch, archival, and CEO/CTO conflicts.
-- **CEO:** co-designs products and protects product intent, scope, sequence, momentum, and simplicity. It does not allocate Tokens, rank unlike products, or stop development for compute scarcity.
-- **CTO:** co-designs the minimum sound technical path and protects correctness, safety, maintainability, and complexity. It can block an affected unsafe merge/deploy, not the product.
-- **Owner:** canonical writer for one product, continuously executing its accepted Spec.
+| Actor | Owns | May do | Must not do |
+| --- | --- | --- | --- |
+| Human Board | Company direction and irreversible authority | Assign Signals; select, reject, or request evidence; approve production and major changes; resolve CEO/CTO deadlock | Delegate portfolio allocation or final Product Bet choice to an agent |
+| CPO | Pre-project evidence | Investigate assigned Signals; create/revise/submit Bets; advise Board, CEO, CTO; use bounded research delegates | Select/reject, promote, endorse, launch, approve, instruct Owner, edit product code |
+| CEO | Product intent and sequence | Promote the selected Bet; shape user outcome, scope, non-goals, acceptance; endorse launch/release; issue product corrections | Override technical safety, edit product code, rank unrelated products |
+| CTO | Technical safety and quality floor | Shape architecture; supervise every Owner; endorse launch/release; issue technical corrections; stop affected unsafe work | Create/promote a project, redefine product intent, stop compatible work |
+| Owner | One product's canonical implementation | Execute accepted Spec work; verify; checkpoint; request review/action; execute Board-approved release | Write another product, change intent silently, accept CPO commands, self-approve production |
 
-CEO and CTO are peer lenses, not a reporting hierarchy. Tool visibility does not change these boundaries.
+## Signal and Product Bet lifecycle
 
-## Product lifecycle
+1. The Board assigns a traceable Signal. A reviewed Daily Product Teardown file may be a source exactly like a Board note; teardown is not a built-in CPO capability or scheduled step.
+2. CPO chooses the evidence method. Product analysis, business-system analysis, validation, and research acquisition remain external skills and can be revisited in any order.
+3. CPO maintains `bets/BET-NNNN/revisions/RNNN/PRODUCT_BET_PACKET.md`. Submission freezes a manifest containing file and evidence digests plus `not_run`, `tbd`, `passed`, `mixed`, `failed`, or `invalid` validation evidence.
+4. The Board binds one exact digest to `select`, `reject`, or `more_evidence`. `more_evidence` names the gap, never the method. Validation state does not determine the Board decision.
+5. Rejected Bets and their history remain in Git and create no project. A new revision requires `more_evidence` or explicit `reopen`; submitted revisions are immutable.
+6. CEO alone promotes the current selected digest. The product repository receives an exact snapshot and enters shaping.
 
-Projects move through `registered`, `shaping`, `ready`, `active`, `blocked_external`, and `archived`. CEO or CTO creates a project conversationally. Before Owner launch they jointly create:
+Variants use `variant_of`; known duplicates use `duplicate_of`. They remain separate evidence records. No agent allocates attention or funding across them.
 
-- `BRIEF.md`: user, problem, desired outcome, smallest useful vertical, scope/non-goals, acceptance evidence, and unknowns;
-- `.specify/memory/constitution.md`: stable engineering principles and project overlay;
-- a first Spec or `spec-seeds/001-first-vertical.md`: behavior plus technical constraints and quality floor;
-- CEO and CTO endorsements bound to the digest of those exact artifacts.
+## Shaping and Owner launch
 
-Once launched, the Owner completes Spec Kit's `specify → clarify → plan → tasks → implement → converge` flow as appropriate. Small bounded fixes need not manufacture a full new lifecycle. Requirements cannot change only in chat: durable instructions identify whether a Spec revision is required.
+CEO owns `BRIEF.md` product intent, user outcome, scope, sequence, non-goals, and acceptance. CTO owns the project constitution overlay, technical constraints, correctness, safety, maintainability, and quality floor. They shape as peers.
 
-## Owner work queue
+Each endorses the same current launch digest. Artifact edits invalidate both endorsements. An Owner starts only after the gate passes. The existing Board waiver remains valid only for one missing peer endorsement and never for a missing mandatory artifact.
 
-An Owner wrapper claims one SQLite work item, resumes the exact Trae thread for one noninteractive atomic turn, streams its log to the hidden tmux pane, records a checkpoint or blocker, acknowledges the source message, then claims the next item.
+## Delivery and supervision
 
-CEO/CTO instructions are structured records containing authority, target project/Spec/task, observation, evidence, required action, forbidden expansion, acceptance delta, effective boundary, and whether a Spec revision is required. Product actions are `ALIGN`, `NARROW`, `RESEQUENCE`, `CONTINUE`, and `ESCALATE`; technical actions are `CORRECT`, `SIMPLIFY`, `HARDEN`, `CONTINUE`, and `ESCALATE`.
+Each project has one writer lease and FIFO-priority work queue. An Owner runs one atomic Trae turn, verifies the smallest complete result, writes a checkpoint or real-gate request, acknowledges its source message, and then claims compatible work. New instructions wait; OneCo never types into a busy pane.
 
-New instructions never inject input into a running Agent. They remain queued until the current atomic turn ends. Safe compatible work continues by default; the Owner waits only for an unsafe, irreversible, conflicting, or product-changing decision.
+An Owner blocker is append-only. After the corrective work is verified, the same current Owner records a separate resolution tied to a later checkpoint. OneCo keeps the original blocker, removes it from active Board attention, and rebuilds the resolved state from both records after SQLite loss.
 
-## Messages, hooks, and authority
+CTO receives scheduled review work every 240 minutes by default and immediate real-gate requests. Reviews cite evidence, verdict, affected scope, required action, and next review time. `needs_correction` or `blocked` affects only the named unsafe scope. CEO receives the review for product/sequence discussion; the Owner continues independent compatible work.
 
-Messages and acknowledgment live in SQLite. Notifications and Trae hooks are best-effort hints; neither creates authority or completion. Every MCP operation resolves `ONECO_SESSION_ID` against the live runtime, including its logical ID, authority kind, and epoch. Model-supplied role strings are not trusted.
+Product questions route to CEO. Technical questions route to CTO. CPO may add post-selection evidence to CEO or CTO but cannot alter the product, queue, or Owner mandate.
 
-Canonical executives can create/endorse/launch products, instruct Owners within their verb set, and decide their approval domains. Owners can checkpoint and request action only for their project. Secretaries/candidates cannot mutate the organization and can message only their parent.
+## Messaging contract
 
-## External action approvals
+| Sender | Allowed recipients |
+| --- | --- |
+| Board | CPO, CEO, CTO, and the exact Owner for an approved production action |
+| CPO | Board, CEO, CTO |
+| CEO / CTO | Board, CPO, each other, and an Owner only with the matching project scope |
+| Owner | CEO and CTO, only for its own project |
+| Delegate / Secretary | Its parent persistent role only |
 
-| Domain | Required approval |
+Messages carry a thread key, object ID, optional artifact digest, sender session and epoch, and per-thread sequence. Idempotency keys make retries safe. New artifact digests mark older notices stale. Acknowledgement is explicit and repeat-safe. Durable shared records carry decisions; direct messages carry attention and handoff, not secret alternative truth.
+
+## External actions and release
+
+| External-action domain | Required approval |
 | --- | --- |
 | `product` | CEO |
 | `technical` | CTO |
 | `cross_domain` | CEO and CTO |
 
-Strategic, production, sensitive-data, high-permission, or irreversible choices remain Board decisions even when an executive can record the operational approval.
+Strategic, sensitive, irreversible, and production choices remain Board decisions.
 
-## Recovery
-
-- Terminal lost, provider thread healthy: reopen and exact-resume the same UUID.
-- Owner worker lost: requeue claimed/running work, retain the writer epoch, and exact-resume the Owner thread.
-- Provider thread broken: exact-fork a recovery candidate and require an exact, time-limited Board phrase inside the candidate chat before succession.
-- Runtime lost: rebuild derivable indexes/messages from versioned artifacts, then reopen sessions.
-- Old process returns: epoch fencing rejects its writes.
-
-Never rely on `--last`, cwd guessing, a tmux pane ID, or the model's claimed identity for recovery.
+A verified increment becomes a release candidate only when it names an exact product Git commit and durable acceptance-evidence files. CEO and CTO endorse the same release digest. The Board then approves or rejects that digest. Approval queues one Owner production action; it does not claim that deployment succeeded. The Owner records the result separately.

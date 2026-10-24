@@ -40,9 +40,79 @@ class WorkState(StrEnum):
 
 class AuthorityKind(StrEnum):
     CANONICAL = "canonical"
+    ADVISORY = "advisory"
     OWNER = "owner"
     SECRETARY = "secretary"
     CANDIDATE = "candidate"
+
+
+class IdentityKind(StrEnum):
+    PERSISTENT_ROLE = "persistent_role"
+    OWNER = "owner"
+    DELEGATE = "delegate"
+    CANDIDATE = "candidate"
+
+
+class CompanyRole(StrEnum):
+    BOARD = "BOARD"
+    CPO = "CPO"
+    CEO = "CEO"
+    CTO = "CTO"
+    OWNER = "OWNER"
+
+
+class SignalStatus(StrEnum):
+    RECORDED = "recorded"
+    ASSIGNED = "assigned"
+    INVESTIGATING = "investigating"
+    LINKED = "linked"
+    CLOSED = "closed"
+
+
+class BetRevisionState(StrEnum):
+    DRAFT = "draft"
+    READY_FOR_BOARD = "ready_for_board"
+    MORE_EVIDENCE = "more_evidence"
+    SELECTED = "selected"
+    REJECTED = "rejected"
+    PROMOTED = "promoted"
+    SUPERSEDED = "superseded"
+
+
+class BoardDecisionKind(StrEnum):
+    SELECT = "select"
+    REJECT = "reject"
+    MORE_EVIDENCE = "more_evidence"
+    REOPEN = "reopen"
+    APPROVE_RELEASE = "approve_release"
+    REJECT_RELEASE = "reject_release"
+
+
+class ValidationState(StrEnum):
+    NOT_RUN = "not_run"
+    TBD = "tbd"
+    PASSED = "passed"
+    MIXED = "mixed"
+    FAILED = "failed"
+    INVALID = "invalid"
+
+
+class ReviewVerdict(StrEnum):
+    ON_TRACK = "on_track"
+    NEEDS_CORRECTION = "needs_correction"
+    BLOCKED = "blocked"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
+class ReleaseState(StrEnum):
+    CANDIDATE = "candidate"
+    STALE = "stale"
+    READY = "ready"
+    APPROVED = "approved"
+    QUEUED = "queued"
+    RELEASED = "released"
+    REJECTED = "rejected"
+    FAILED = "failed"
 
 
 class DesktopConfig(BaseModel):
@@ -63,6 +133,11 @@ class ProjectRecord(BaseModel):
     state: ProjectState = ProjectState.REGISTERED
     current_spec: str | None = None
     current_task: str | None = None
+    source_bet_id: str | None = None
+    source_bet_revision: int | None = Field(default=None, ge=1)
+    source_bet_digest: str | None = None
+    promotion_id: str | None = None
+    bet_change_pending: bool = False
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -96,7 +171,7 @@ class Portfolio(BaseModel):
 class CompanyManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: int = Field(default=2, ge=1, le=2)
+    schema_version: int = Field(default=3, ge=1, le=3)
     company_name: str = Field(min_length=1, max_length=120)
     language: str = "en"
     provider: str = "trae"
@@ -105,6 +180,193 @@ class CompanyManifest(BaseModel):
     # Read-only compatibility for v0.1 manifests. Workspace.open migrates it away.
     terminal: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class SourceReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str = Field(pattern=r"^SRC-[0-9]{3,}$")
+    kind: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    uri: str | None = None
+    observed_at: datetime
+    captured_path: str | None = None
+    sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    portable: bool = True
+
+    @model_validator(mode="after")
+    def has_location(self) -> SourceReference:
+        if not self.uri and not self.captured_path:
+            raise ValueError("source requires a URI or captured path")
+        return self
+
+
+class SignalRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signal_id: str = Field(pattern=r"^SIG-[0-9]{3,}$")
+    title: str = Field(min_length=1, max_length=160)
+    summary: str = Field(min_length=1)
+    status: SignalStatus = SignalStatus.RECORDED
+    assigned_by: str = "BOARD"
+    source_ids: list[str] = Field(min_length=1)
+    linked_bet_ids: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class EvidenceReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    path: str | None = None
+    uri: str | None = None
+    sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    observed_at: datetime
+    source_skill: str | None = None
+    portable: bool = True
+
+    @model_validator(mode="after")
+    def has_location(self) -> EvidenceReference:
+        if not self.path and not self.uri:
+            raise ValueError("evidence requires a path or URI")
+        return self
+
+
+class BetRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    bet_id: str = Field(pattern=r"^BET-[0-9]{3,}$")
+    title: str = Field(min_length=1, max_length=160)
+    signal_ids: list[str] = Field(min_length=1)
+    variant_of: str | None = None
+    duplicate_of: str | None = None
+    current_revision: int = Field(default=0, ge=0)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class BetRevisionManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    bet_id: str = Field(pattern=r"^BET-[0-9]{3,}$")
+    revision: int = Field(ge=1)
+    state: BetRevisionState
+    validation_state: ValidationState = ValidationState.NOT_RUN
+    packet_path: str
+    packet_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    evidence: list[EvidenceReference] = Field(default_factory=list)
+    composite_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    supersedes_revision: int | None = Field(default=None, ge=1)
+    submitted_by: str
+    submitted_at: datetime = Field(default_factory=utc_now)
+
+
+class BoardDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision_id: str
+    kind: BoardDecisionKind
+    bet_id: str | None = None
+    revision: int | None = Field(default=None, ge=1)
+    packet_digest: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    project_id: str | None = None
+    release_id: str | None = None
+    release_digest: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    reason: str = Field(min_length=1)
+    evidence_gap: str | None = None
+    provider_thread_id: str | None = None
+    provider_turn_id: str | None = None
+    supersedes: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def decision_target_is_complete(self) -> BoardDecision:
+        if self.kind in {
+            BoardDecisionKind.SELECT,
+            BoardDecisionKind.REJECT,
+            BoardDecisionKind.MORE_EVIDENCE,
+            BoardDecisionKind.REOPEN,
+        }:
+            if not self.bet_id or self.revision is None or not self.packet_digest:
+                raise ValueError("Bet decisions require bet, revision, and packet digest")
+        if self.kind in {
+            BoardDecisionKind.APPROVE_RELEASE,
+            BoardDecisionKind.REJECT_RELEASE,
+        } and (not self.project_id or not self.release_id or not self.release_digest):
+            raise ValueError("release decisions require project, release, and digest")
+        if self.kind == BoardDecisionKind.MORE_EVIDENCE and not self.evidence_gap:
+            raise ValueError("more-evidence decisions require a named evidence gap")
+        return self
+
+
+class PromotionRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    promotion_id: str
+    bet_id: str = Field(pattern=r"^BET-[0-9]{3,}$")
+    revision: int = Field(ge=1)
+    packet_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    board_decision_id: str
+    project_id: str = Field(pattern=r"^PROJ-[0-9]{3,}$")
+    project_commit: str | None = None
+    promoted_by: str = "CEO"
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class ReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    review_id: str
+    project_id: str = Field(pattern=r"^PROJ-[0-9]{3,}$")
+    checkpoint_id: str | None = None
+    reason: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+    requested_by: str
+    status: str = "open"
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class TechnicalReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    review_id: str
+    project_id: str = Field(pattern=r"^PROJ-[0-9]{3,}$")
+    checkpoint_id: str | None = None
+    reviewer: str = "CTO"
+    verdict: ReviewVerdict
+    evidence: str = Field(min_length=1)
+    required_action: str = Field(min_length=1)
+    affected_scope: str = Field(min_length=1)
+    next_review_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class SupervisionPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    interval_minutes: int = Field(default=240, ge=15)
+    progress_pulse_target_minutes: int = Field(default=15, ge=1)
+    changed_by: str = "BOARD"
+    reason: str = "OneCo v1 default"
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ReleaseRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    release_id: str = Field(pattern=r"^rel_[a-f0-9]{32}$")
+    project_id: str = Field(pattern=r"^PROJ-[0-9]{3,}$")
+    product_commit: str = Field(min_length=1)
+    release_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    acceptance_evidence: list[str] = Field(min_length=1)
+    acceptance_evidence_hashes: dict[str, str] = Field(default_factory=dict)
+    state: ReleaseState = ReleaseState.CANDIDATE
+    ceo_endorsed_digest: str | None = None
+    cto_endorsed_digest: str | None = None
+    board_decision_id: str | None = None
+    result_evidence: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class Checkpoint(BaseModel):
@@ -124,6 +386,7 @@ class Checkpoint(BaseModel):
     risk_or_blocker: str = "none"
     next_task: str = Field(min_length=1)
     reuse_candidate: str | None = None
+    source_instruction_id: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
     @field_validator("key_files")
@@ -134,6 +397,35 @@ class Checkpoint(BaseModel):
             if path.is_absolute() or ".." in path.parts:
                 raise ValueError("key_files must be project-relative paths")
         return values
+
+
+class BlockerRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    blocker_id: str
+    project_id: str = Field(pattern=r"^PROJ-[0-9]{3,}$")
+    reported_by: str
+    recorded_session_id: str | None = None
+    recorded_epoch: int | None = Field(default=None, ge=1)
+    summary: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+    requested_decision: str = Field(min_length=1)
+    status: str = "open"
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class BlockerResolutionRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resolution_id: str
+    blocker_id: str
+    project_id: str = Field(pattern=r"^PROJ-[0-9]{3,}$")
+    resolved_by: str
+    recorded_session_id: str | None = None
+    recorded_epoch: int | None = Field(default=None, ge=1)
+    checkpoint_id: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class InstructionAction(StrEnum):

@@ -7,6 +7,7 @@ import pytest
 
 from oneco_os.errors import AuthorizationError, ConflictError, StaleSessionError
 from oneco_os.models import AuthorityKind
+from oneco_os.records import commit_exact
 from oneco_os.runtime import Runtime
 from oneco_os.workspace import Workspace
 
@@ -29,7 +30,7 @@ def test_runtime_v1_database_migrates_without_losing_rows(tmp_path: Path) -> Non
     with runtime.connect() as connection:
         assert connection.execute(
             "SELECT value FROM metadata WHERE key='schema_version'"
-        ).fetchone()[0] == "2"
+            ).fetchone()[0] == "3"
 
 
 def test_work_queue_serializes_owner_turns_and_preserves_new_work(tmp_path: Path) -> None:
@@ -81,7 +82,11 @@ def test_succession_requires_exact_candidate_confirmation_and_fences_old_role(
         str(candidate["session_id"]), "turn-confirmed", phrase
     )
     assert promoted and promoted["role"] == "CEO"
-    assert runtime.current_session("CEO")["id"] == candidate["session_id"]
+    current = runtime.current_session("CEO")
+    assert current["id"] == candidate["session_id"]
+    assert current["epoch"] == promoted["epoch"]
+    assert current["authority_kind"] == AuthorityKind.CANONICAL
+    assert runtime.assert_current(str(candidate["session_id"]), int(promoted["epoch"]))
     with pytest.raises(StaleSessionError):
         runtime.assert_current(str(old["session_id"]), int(old["epoch"]))
 
@@ -97,14 +102,14 @@ def test_manifest_v1_migrates_to_desktop_v2_with_backup(tmp_path: Path) -> None:
 
     migrated = Workspace.open(root)
 
-    assert migrated.manifest().schema_version == 2
+    assert migrated.manifest().schema_version == 3
     assert migrated.manifest().desktop.executives == "ghostty"
     assert migrated.manifest().desktop.owners == "tmux"
     assert (root / ".oneco" / "backups" / "manifest-v1.json").is_file()
 
 
 def test_launch_endorsements_are_invalidated_by_artifact_change(workspace: Workspace) -> None:
-    project = workspace.register_project("Alpha", Path("alpha"), initialize_git=False)
+    project = workspace.register_project("Alpha", Path("alpha"), initialize_git=True)
     project_root = workspace.project_path(project.id)
     for relative in (
         "BRIEF.md",
@@ -116,7 +121,11 @@ def test_launch_endorsements_are_invalidated_by_artifact_change(workspace: Works
             path.read_text(encoding="utf-8").replace("TBD", "Defined").replace("DRAFT —", "READY —"),
             encoding="utf-8",
         )
-    (project_root / ".git").mkdir()
+    commit_exact(
+        project_root,
+        [path for path in project_root.rglob("*") if path.is_file() and ".git" not in path.parts],
+        "test: commit launch packet",
+    )
     workspace.endorse_launch(project.id, "CEO", "Product ready")
     workspace.endorse_launch(project.id, "CTO", "Technical path ready")
     assert workspace.readiness(project.id)[0] is True
@@ -140,12 +149,28 @@ def test_board_override_requires_human_turn_and_cannot_bypass_artifacts(
     workspace.runtime.record_human_turn(
         "provider-ceo", "turn-1", f"Just launch {project.id}."
     )
+    workspace.runtime.record_launch_endorsement(
+        project.id, "CEO", workspace.launch_digest(project.id)
+    )
     override = workspace.runtime.consume_launch_override(project.id, "provider-ceo")
     assert override == "turn-1"
     assert workspace.runtime.consume_launch_override(project.id, "provider-ceo") is None
     with pytest.raises(Exception, match="cannot bypass artifacts"):
         workspace.activate_from_launch(project.id, actor="CEO", board_override_turn_id=override)
     assert executive["logical_id"] == "CEO"
+
+
+def test_launch_override_requires_exactly_one_missing_endorsement(tmp_path: Path) -> None:
+    runtime = Runtime(tmp_path / "runtime.sqlite")
+    runtime.initialize()
+    runtime.record_human_turn("thread-none", "turn-none", "Just launch PROJ-001.")
+
+    assert runtime.consume_launch_override("PROJ-001", "thread-none") is None
+
+    runtime.record_launch_endorsement("PROJ-001", "CEO", "digest-1")
+    runtime.record_human_turn("thread-one", "turn-one", "Just launch PROJ-001.")
+
+    assert runtime.consume_launch_override("PROJ-001", "thread-one") == "turn-one"
 
 
 def test_secretary_cannot_be_treated_as_canonical_executive(tmp_path: Path) -> None:

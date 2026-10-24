@@ -32,7 +32,7 @@ def create_launcher(workspace: Workspace, destination: Path | None = None) -> Pa
         "CFBundleIdentifier": bundle_id,
         "CFBundleName": "OneCo Bridge",
         "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": "0.2.0",
+        "CFBundleShortVersionString": "1.0.0",
         "LSMinimumSystemVersion": "13.0",
         "NSHighResolutionCapable": True,
     }

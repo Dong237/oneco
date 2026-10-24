@@ -38,7 +38,7 @@ def test_initialize_creates_private_wal_database_with_version(runtime: Runtime) 
             connection.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[
                 0
             ]
-            == "2"
+            == "3"
         )
 
 
@@ -84,6 +84,20 @@ def test_close_releases_identity_and_preserves_monotonic_epoch(
         runtime.assert_current("ses_missing", 1)
 
 
+def test_mark_lost_resets_work_state_without_discarding_identity(
+    runtime: Runtime, tmp_path: Path
+) -> None:
+    session = runtime.register_session("CTO", tmp_path, provider_session_id="thread-1")
+    runtime.touch(str(session["session_id"]), int(session["epoch"]), "working")
+
+    runtime.mark_lost(str(session["session_id"]), int(session["epoch"]))
+
+    current = runtime.current_session("CTO")
+    assert current["lifecycle"] == "lost"
+    assert current["work_state"] == "idle"
+    assert current["provider_session_id"] == "thread-1"
+
+
 def test_messages_are_durable_idempotent_and_acknowledged_by_recipient(
     runtime: Runtime, tmp_path: Path
 ) -> None:
@@ -100,7 +114,7 @@ def test_messages_are_durable_idempotent_and_acknowledged_by_recipient(
         "CEO",
         "PROJ-001:owner",
         "instruction",
-        "A retry must not create another message",
+        "Continue TASK-002",
         project_id="PROJ-001",
         requires_ack=True,
         idempotency_key="instruction-001",
@@ -120,6 +134,45 @@ def test_messages_are_durable_idempotent_and_acknowledged_by_recipient(
     acknowledged = reopened.inbox("PROJ-001:owner")[0]
     assert acknowledged["acked_by"] == "PROJ-001:owner"
     assert acknowledged["acked_at"] is not None
+
+
+def test_message_retry_remains_idempotent_after_sender_session_replacement(
+    runtime: Runtime, tmp_path: Path
+) -> None:
+    first = runtime.register_session("CEO", tmp_path)
+    message_id = runtime.send_message(
+        "CEO",
+        "CTO",
+        "shaping",
+        "Review the exact product boundary",
+        idempotency_key="shaping-retry-001",
+        sender_session_id=str(first["session_id"]),
+        sender_epoch=int(first["epoch"]),
+    )
+    replacement = runtime.register_session("CEO", tmp_path, replace=True)
+
+    duplicate_id = runtime.send_message(
+        "CEO",
+        "CTO",
+        "shaping",
+        "Review the exact product boundary",
+        idempotency_key="shaping-retry-001",
+        sender_session_id=str(replacement["session_id"]),
+        sender_epoch=int(replacement["epoch"]),
+    )
+
+    assert duplicate_id == message_id
+    assert len(runtime.inbox("CTO")) == 1
+    with pytest.raises(ConflictError, match="different message"):
+        runtime.send_message(
+            "CEO",
+            "CTO",
+            "shaping",
+            "A changed product boundary",
+            idempotency_key="shaping-retry-001",
+            sender_session_id=str(replacement["session_id"]),
+            sender_epoch=int(replacement["epoch"]),
+        )
 
 
 def test_broadcast_messages_are_visible_to_each_role(runtime: Runtime) -> None:
@@ -230,7 +283,7 @@ def test_snapshot_exposes_coordination_state_without_leaderboard_metrics(
     runtime: Runtime, tmp_path: Path
 ) -> None:
     runtime.register_session("CEO", tmp_path)
-    runtime.send_message("BOARD", "CEO", "decision", "Continue")
+    runtime.send_message("BOARD", "CEO", "decision", "Continue", requires_ack=True)
     runtime.create_action(_action("act_product", "product"))
 
     snapshot = runtime.snapshot()

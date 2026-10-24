@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from oneco_os.models import ProjectState
+from oneco_os.records import commit_exact
 from oneco_os.workspace import Workspace
 
 
@@ -17,7 +18,7 @@ def workspace(tmp_path: Path) -> Workspace:
 @pytest.fixture
 def active_project(workspace: Workspace) -> tuple[Workspace, str, Path]:
     project = workspace.register_project(
-        "Alpha Product", Path("alpha-product"), initialize_git=False
+        "Alpha Product", Path("alpha-product"), initialize_git=True
     )
     project_root = workspace.project_path(project.id)
 
@@ -36,7 +37,11 @@ def active_project(workspace: Workspace) -> tuple[Workspace, str, Path]:
     (project_root / "decisions" / "launch-endorsements.json").write_text(
         json.dumps({"CEO": True, "CTO": True}), encoding="utf-8"
     )
-    (project_root / ".git").mkdir()
-
+    commit_exact(
+        project_root,
+        [path for path in project_root.rglob("*") if path.is_file() and ".git" not in path.parts],
+        "test: prepare project fixture",
+    )
     workspace.set_state(project.id, ProjectState.ACTIVE, actor="BOARD")
+    commit_exact(project_root, [project_root / "project.json"], "test: activate project fixture")
     return workspace, project.id, project_root

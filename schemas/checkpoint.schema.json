@@ -19,6 +19,7 @@
     "risk_or_blocker",
     "next_task",
     "reuse_candidate",
+    "source_instruction_id",
     "created_at"
   ],
   "properties": {
@@ -46,6 +47,7 @@
     "risk_or_blocker": { "type": "string" },
     "next_task": { "type": "string", "minLength": 1 },
     "reuse_candidate": { "type": ["string", "null"] },
+    "source_instruction_id": { "type": ["string", "null"] },
     "created_at": { "type": "string", "format": "date-time" }
   }
 }

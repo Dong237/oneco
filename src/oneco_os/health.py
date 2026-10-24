@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from .adapters import ghostty, trae
+from .errors import WorkspaceError
 from .workspace import Workspace
 
 ONECO_MCP_SESSION_ENV = {
@@ -28,12 +31,82 @@ def _command_health(command: str) -> dict[str, str]:
     )
 
 
+def _skill_health(path: Path, expected_name: str) -> dict[str, str]:
+    if not path.is_file():
+        return {
+            "state": "missing",
+            "diagnostic": f"required external skill contract not found: {path}",
+        }
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return {"state": "incompatible", "diagnostic": f"cannot read {path}: {exc}"}
+    frontmatter = re.match(r"\A---\s*\n(.*?)\n---(?:\s*\n|\Z)", text, re.DOTALL)
+    name_match = (
+        re.search(r"(?m)^name:\s*['\"]?([^'\"\n]+?)['\"]?\s*$", frontmatter.group(1))
+        if frontmatter
+        else None
+    )
+    declared = name_match.group(1).strip() if name_match else None
+    if declared != expected_name:
+        return {
+            "state": "incompatible",
+            "diagnostic": (
+                f"expected external skill {expected_name}, found {declared or 'no declared name'} "
+                f"at {path}"
+            ),
+        }
+    body = text[frontmatter.end() :] if frontmatter else text
+    description_match = (
+        re.search(r"(?m)^description:\s*(?:>|\|)?\s*\S", frontmatter.group(1))
+        if frontmatter
+        else None
+    )
+    substantive = re.sub(r"\s+", "", body)
+    if not description_match or len(substantive) < 40 or not re.search(r"(?m)^#\s+\S", body):
+        return {
+            "state": "incompatible",
+            "diagnostic": (
+                f"external skill contract needs a description and substantive Markdown body: {path}"
+            ),
+        }
+    return {"state": "ok", "diagnostic": str(path)}
+
+
 def collect(workspace: Workspace, *, persist: bool = True) -> list[dict[str, Any]]:
     checks: dict[str, tuple[str, dict[str, str]]] = {
         "ghostty": ("host", ghostty.health()),
         "tmux": ("host", _command_health("tmux")),
         "trae": ("host", _command_health("traecli")),
         "specify": ("host", _command_health("specify")),
+        "agent-reach": (
+            "external-skill",
+            _skill_health(
+                Path.home() / ".agents" / "skills" / "agent-reach" / "SKILL.md",
+                "agent-reach",
+            ),
+        ),
+        "analyzing-a-product-skill": (
+            "external-skill",
+            _skill_health(
+                Path.home() / ".trae" / "skills" / "analyzing-a-product-skill" / "SKILL.md",
+                "analyzing-a-product-skill",
+            ),
+        ),
+        "analyzing-a-business-system": (
+            "external-skill",
+            _skill_health(
+                Path.home() / ".trae" / "skills" / "analyzing-a-business-system" / "SKILL.md",
+                "analyzing-a-business-system",
+            ),
+        ),
+        "proposing-a-product-bet": (
+            "external-skill",
+            _skill_health(
+                Path.home() / ".trae" / "skills" / "proposing-a-product-bet" / "SKILL.md",
+                "proposing-a-product-bet",
+            ),
+        ),
     }
     try:
         binary = trae.find_trae()
@@ -107,10 +180,12 @@ def collect(workspace: Workspace, *, persist: bool = True) -> list[dict[str, Any
                 else (mcp_result.stderr.strip() or "Trae MCP discovery failed"),
             },
         )
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, WorkspaceError) as exc:
         diagnostic = {"state": "degraded", "diagnostic": str(exc)}
+        checks["trae"] = ("host", diagnostic)
         checks["oneco-plugin"] = ("trae", diagnostic)
         checks["oneco-mcp-session-env"] = ("trae", diagnostic)
+        checks["user-mcp-profile"] = ("trae", diagnostic)
     rows = []
     for name, (source, result) in checks.items():
         if persist:

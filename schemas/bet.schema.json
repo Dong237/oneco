@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oneco:schema:bet:1",
+  "title": "OneCo Product Bet identity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["bet_id", "title", "signal_ids", "variant_of", "duplicate_of", "current_revision", "created_at"],
+  "properties": {
+    "bet_id": {"type": "string", "pattern": "^BET-[0-9]{4,}$"},
+    "title": {"type": "string", "minLength": 1},
+    "signal_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^SIG-[0-9]{4,}$"}},
+    "variant_of": {"type": ["string", "null"], "pattern": "^BET-[0-9]{4,}$"},
+    "duplicate_of": {"type": ["string", "null"], "pattern": "^BET-[0-9]{4,}$"},
+    "current_revision": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

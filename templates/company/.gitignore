@@ -1,5 +1,6 @@
 .oneco/runtime.sqlite*
 .oneco/bridge.sock
 .oneco/backups/
+.oneco/locks/
 .oneco/logs/
 .DS_Store

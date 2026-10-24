@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import shutil
 import sqlite3
 import subprocess
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from .errors import AuthorizationError, ConflictError, ProjectError, WorkspaceError
 from .models import CompanyManifest, DesktopConfig, Portfolio, ProjectRecord, ProjectState
+from .records import commit_exact, committed_file_matches_head
 from .runtime import Runtime
 from .util import atomic_json, load_json, safe_child, slugify
 
@@ -34,9 +36,10 @@ Build useful products as a one-person AI-native company through clear context, a
 
 ## Roles
 
-- The human Board shapes products with CEO and CTO and decides company direction, product activation/archival, and strategic conflicts.
-- CEO co-designs products and protects user intent, scope, momentum, and simplicity. CEO does not allocate coding tokens or stop products for compute scarcity.
-- CTO co-designs technical direction and protects correctness, safety, maintainability, and simplicity. CTO may block an unsafe merge or external action, not the whole product.
+- The human Board alone selects Product Bets, approves production releases and major changes, and resolves product-versus-safety deadlocks.
+- CPO investigates Board-assigned Signals and prepares evidence-backed Product Bet packets. CPO is advisory and has no delivery authority.
+- CEO alone promotes a selected Bet and protects user intent, scope, momentum, and simplicity. CEO does not allocate coding tokens or stop products for compute scarcity.
+- CTO shapes the technical path and protects correctness, safety, maintainability, and simplicity. CTO may block affected unsafe work, not the whole product.
 - Product Owners continuously execute their approved Specs inside their own project boundary.
 
 ## External actions
@@ -45,13 +48,17 @@ Owners request approval before external actions. CEO approves product/market act
 """
 
 ROLE_TEMPLATES = {
+    "CPO.md": """# CPO
+
+Investigate only Board-assigned Signals. Maintain Product Bet evidence, counterevidence, unknowns, recommendations, and immutable submitted revisions. Use installed external research Skills directly when evidence requires them, but never hide disagreement or silently substitute a missing capability. Never select or reject for the Board, create or promote a project, endorse or launch, approve an external action, instruct an Owner, or edit product code.
+""",
     "CEO.md": """# CEO
 
-Co-design products with the Board and CTO. Guard user intent, scope, momentum, and simplicity. Review structured checkpoints, not terminal transcripts. Use ALIGN, NARROW, RESEQUENCE, CONTINUE, or ESCALATE. Never allocate coding tokens, rank unrelated products, modify product code, or archive a product.
+Promote only the exact Product Bet selected by the Board. Turn it into product intent, scope, sequence, non-goals, acceptance criteria, and one prepared Owner. Guard product drift during delivery. Use ALIGN, NARROW, RESEQUENCE, CONTINUE, or ESCALATE. Make the final delivery call inside CTO's evidence-backed safety boundary. Never allocate coding tokens, rank unrelated products, modify product code after Owner launch, or override technical safety.
 """,
     "CTO.md": """# CTO
 
-Co-design the minimum sound technical path. Guard architecture, correctness, safety, maintainability, and complexity. Review structured checkpoints, not terminal transcripts. Use CORRECT, SIMPLIFY, HARDEN, CONTINUE, or ESCALATE. Block only affected unsafe work; never change product intent or archive a product.
+Create the minimum sound technical specifications during shaping, then actively supervise every Owner. Review active work every four hours by default and inspect every real gate. Guard architecture, correctness, safety, maintainability, and complexity. Use CORRECT, SIMPLIFY, HARDEN, CONTINUE, or ESCALATE. Block only affected unsafe work. Never create a project, never change product intent, and never archive a product.
 """,
     "OWNER.md": """# Product Owner
 
@@ -199,11 +206,16 @@ class Workspace:
             raise ConflictError(f"already a OneCo company: {root}")
         for directory in (
             root / "roles",
+            root / "signals",
+            root / "bets",
             root / "portfolio" / "decisions",
             root / "portfolio" / "approvals",
+            root / "operations",
             root / "playbook",
             root / ".oneco" / "backups",
             root / ".oneco" / "logs",
+            root / ".oneco" / "recovery",
+            root / ".oneco" / "failed-transactions",
         ):
             directory.mkdir(parents=True, exist_ok=True)
         desktop = DesktopConfig(owners=terminal)
@@ -219,19 +231,51 @@ class Workspace:
             root / "playbook" / "README.md",
             "# Playbook\n\nPromote only demonstrated, reusable patterns and failure lessons.\n",
         )
+        atomic_json(
+            root / "operations" / "supervision-policy.json",
+            {
+                "interval_minutes": 240,
+                "progress_pulse_target_minutes": 15,
+                "changed_by": "BOARD",
+                "reason": "OneCo v1 default",
+                "updated_at": datetime.now(UTC).isoformat(),
+            },
+        )
         _ensure_lines(
             root / ".gitignore",
             [
                 ".oneco/runtime.sqlite*",
+                ".oneco/runtime.db*",
+                ".oneco/locks/",
                 ".oneco/bridge.sock",
                 ".oneco/backups/",
                 ".oneco/logs/",
+                ".oneco/recovery/",
+                ".oneco/failed-transactions/",
+                ".oneco/supervisor.pid",
+                ".oneco/supervisor.sock",
                 ".DS_Store",
             ],
         )
         workspace.runtime.initialize()
         if git_init:
             _git_init(root)
+            commit_exact(
+                root,
+                [
+                    workspace.manifest_path,
+                    workspace.portfolio_path,
+                    root / "COMPANY.md",
+                    root / "roles" / "CPO.md",
+                    root / "roles" / "CEO.md",
+                    root / "roles" / "CTO.md",
+                    root / "roles" / "OWNER.md",
+                    root / "operations" / "supervision-policy.json",
+                    root / "playbook" / "README.md",
+                    root / ".gitignore",
+                ],
+                "oneco(board): initialize company",
+            )
         return workspace
 
     @classmethod
@@ -242,7 +286,7 @@ class Workspace:
         workspace._migrate_manifest()
         workspace.manifest()
         workspace.portfolio()
-        workspace._backup_runtime_v1()
+        workspace._backup_legacy_runtime()
         workspace.runtime.initialize()
         return workspace
 
@@ -251,26 +295,59 @@ class Workspace:
 
     def _migrate_manifest(self) -> None:
         data = load_json(self.manifest_path)
-        if int(data.get("schema_version", 1)) >= 2 and "desktop" in data:
+        current = int(data.get("schema_version", 1))
+        if current >= 3 and "desktop" in data:
             return
-        backup = self.root / ".oneco" / "backups" / "manifest-v1.json"
+        backup = self.root / ".oneco" / "backups" / f"manifest-v{current}.json"
         backup.parent.mkdir(parents=True, exist_ok=True)
         if not backup.exists():
             shutil.copy2(self.manifest_path, backup)
-        legacy_terminal = str(data.pop("terminal", "tmux"))
-        data["schema_version"] = 2
-        data["desktop"] = {
-            "cockpit": "macos-webview",
-            "executives": "ghostty",
-            "owners": legacy_terminal,
-        }
+        if "desktop" not in data:
+            legacy_terminal = str(data.pop("terminal", "tmux"))
+            data["desktop"] = {
+                "cockpit": "macos-webview",
+                "executives": "ghostty",
+                "owners": legacy_terminal,
+            }
+        data["schema_version"] = 3
         atomic_json(self.manifest_path, data)
+        self._ensure_v1_layout()
+        if (self.root / ".git").exists():
+            commit_exact(
+                self.root,
+                [
+                    self.manifest_path,
+                    self.root / "roles" / "CPO.md",
+                    self.root / "operations" / "supervision-policy.json",
+                ],
+                "oneco(board): migrate company to v1",
+            )
 
-    def _backup_runtime_v1(self) -> None:
+    def _ensure_v1_layout(self) -> None:
+        for directory in (
+            self.root / "signals",
+            self.root / "bets",
+            self.root / "operations",
+            self.root / ".oneco" / "recovery",
+            self.root / ".oneco" / "failed-transactions",
+        ):
+            directory.mkdir(parents=True, exist_ok=True)
+        _write_new(self.root / "roles" / "CPO.md", ROLE_TEMPLATES["CPO.md"])
+        policy = self.root / "operations" / "supervision-policy.json"
+        if not policy.exists():
+            atomic_json(
+                policy,
+                {
+                    "interval_minutes": 240,
+                    "progress_pulse_target_minutes": 15,
+                    "changed_by": "BOARD",
+                    "reason": "OneCo v1 default",
+                    "updated_at": datetime.now(UTC).isoformat(),
+                },
+            )
+
+    def _backup_legacy_runtime(self) -> None:
         if not self.runtime.database.is_file():
-            return
-        backup = self.root / ".oneco" / "backups" / "runtime-v1.sqlite"
-        if backup.exists():
             return
         try:
             with self.runtime.connect() as connection:
@@ -279,7 +356,13 @@ class Workspace:
                 ).fetchone()
         except sqlite3.Error:
             return
-        if row and str(row[0]) == "1":
+        if not row:
+            return
+        version = int(row[0])
+        if version >= 3:
+            return
+        backup = self.root / ".oneco" / "backups" / f"runtime-v{version}.sqlite"
+        if not backup.exists():
             self.runtime.backup_to(backup)
 
     def portfolio(self) -> Portfolio:
@@ -299,20 +382,73 @@ class Workspace:
         return safe_child(self.root, project.path)
 
     def register_project(
-        self, name: str, path: Path, *, initialize_git: bool = True, scaffold: bool = True
+        self,
+        name: str,
+        path: Path,
+        *,
+        initialize_git: bool = True,
+        scaffold: bool = True,
+        source_bet_id: str | None = None,
+        source_bet_revision: int | None = None,
+        source_bet_digest: str | None = None,
+        promotion_id: str | None = None,
+    ) -> ProjectRecord:
+        lock_path = self.root / ".oneco" / "locks" / "portfolio.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                return self._register_project_unlocked(
+                    name,
+                    path,
+                    initialize_git=initialize_git,
+                    scaffold=scaffold,
+                    source_bet_id=source_bet_id,
+                    source_bet_revision=source_bet_revision,
+                    source_bet_digest=source_bet_digest,
+                    promotion_id=promotion_id,
+                )
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+    def _register_project_unlocked(
+        self,
+        name: str,
+        path: Path,
+        *,
+        initialize_git: bool = True,
+        scaffold: bool = True,
+        source_bet_id: str | None = None,
+        source_bet_revision: int | None = None,
+        source_bet_digest: str | None = None,
+        promotion_id: str | None = None,
     ) -> ProjectRecord:
         target = path.resolve() if path.is_absolute() else (self.root / path).resolve()
         if target.parent != self.root:
             raise ProjectError(
                 "v0.1 product repositories must be direct children of the company root"
             )
+        if target.name.casefold() in {
+            ".git", ".oneco", ".trae", ".agents", ".specify",
+            "roles", "signals", "bets", "portfolio", "operations", "playbook",
+        }:
+            raise ProjectError(f"project path is reserved for company control files: {target.name}")
         target.mkdir(parents=True, exist_ok=True)
         relative = target.relative_to(self.root).as_posix()
         portfolio = self.portfolio()
         if any(item.path == relative for item in portfolio.projects):
             raise ConflictError(f"project path is already registered: {relative}")
         project_id = f"PROJ-{portfolio.next_project_number:03d}"
-        project = ProjectRecord(id=project_id, name=name, slug=slugify(name), path=relative)
+        project = ProjectRecord(
+            id=project_id,
+            name=name,
+            slug=slugify(Path(relative).name),
+            path=relative,
+            source_bet_id=source_bet_id,
+            source_bet_revision=source_bet_revision,
+            source_bet_digest=source_bet_digest,
+            promotion_id=promotion_id,
+        )
 
         # Ignore the nested repository before initializing it so the company repository never stages a gitlink.
         _ensure_lines(self.root / ".gitignore", [f"/{relative}/"])
@@ -333,10 +469,12 @@ class Workspace:
             "spec-seeds",
             "specs",
             "checkpoints",
+            "blockers",
             "instructions",
             "decisions",
             "evidence",
             "handoffs",
+            "handoffs/product-bet",
             ".specify/memory",
         ):
             (target / directory).mkdir(parents=True, exist_ok=True)
@@ -357,25 +495,10 @@ class Workspace:
         _write_new(target / "spec-seeds" / "001-first-vertical.md", SPEC_SEED_TEMPLATE)
 
     def readiness(self, project_id: str) -> tuple[bool, list[str]]:
-        target = self.project_path(project_id)
-        missing: list[str] = []
-        required = [
-            "project.json",
-            "BRIEF.md",
-            "AGENTS.md",
-            ".specify/memory/constitution.md",
-            "spec-seeds/001-first-vertical.md",
-        ]
-        for item in required:
-            path = target / item
-            if not path.is_file():
-                missing.append(f"missing {item}")
-                continue
-            text = path.read_text(encoding="utf-8")
-            if "TBD" in text or "DRAFT —" in text:
-                missing.append(f"incomplete {item}")
+        missing = self._mandatory_launch_reasons(project_id)
         digest = self.launch_digest(project_id) if not missing else None
         packet = self.runtime.launch_packet(project_id)
+        target = self.project_path(project_id)
         endorsements = target / "decisions" / "launch-endorsements.json"
         if packet:
             if packet.get("ceo_endorsed_digest") != digest:
@@ -388,25 +511,60 @@ class Workspace:
             data = load_json(endorsements)
 
             def endorsed(value: object) -> bool:
-                return value is True or (isinstance(value, dict) and value.get("endorsed") is True)
+                # v0.2 stored a bare boolean. v1 endorsements are digest-bound and
+                # must remain stale after SQLite loss when launch artifacts change.
+                return value is True or (
+                    isinstance(value, dict)
+                    and value.get("endorsed") is True
+                    and value.get("digest") == digest
+                )
 
-            if not endorsed(data.get("CEO")) or not endorsed(data.get("CTO")):
-                missing.append("both CEO and CTO endorsements are required")
-        if not (target / ".git").exists():
-            missing.append("project is not an independent Git repository")
+            if not endorsed(data.get("CEO")):
+                missing.append("missing CEO endorsement for current launch packet")
+            if not endorsed(data.get("CTO")):
+                missing.append("missing CTO endorsement for current launch packet")
         return not missing, missing
 
-    def launch_digest(self, project_id: str) -> str:
+    def _mandatory_launch_reasons(self, project_id: str) -> list[str]:
         target = self.project_path(project_id)
-        digest = hashlib.sha256()
+        missing: list[str] = []
+        required = ["project.json", *self._launch_artifact_paths(project_id)]
+        for item in required:
+            path = item if isinstance(item, Path) else target / item
+            relative = path.relative_to(target).as_posix()
+            if not path.is_file():
+                missing.append(f"missing {relative}")
+                continue
+            text = path.read_text(encoding="utf-8")
+            if "TBD" in text or "DRAFT —" in text:
+                missing.append(f"incomplete {relative}")
+        if not (target / ".git").exists():
+            missing.append("project is not an independent Git repository")
+        else:
+            for item in required:
+                path = item if isinstance(item, Path) else target / item
+                if path.is_file() and not committed_file_matches_head(target, path):
+                    missing.append(f"not committed at product HEAD: {path.relative_to(target)}")
+        return missing
+
+    def _launch_artifact_paths(self, project_id: str) -> list[Path]:
+        target = self.project_path(project_id)
         paths = [
             target / "BRIEF.md",
             target / "AGENTS.md",
             target / ".specify" / "memory" / "constitution.md",
         ]
-        spec_paths = sorted((target / "specs").glob("*/spec.md"))
-        paths.extend(spec_paths or [target / "spec-seeds" / "001-first-vertical.md"])
-        for path in paths:
+        feature_state = target / ".specify" / "feature.json"
+        if feature_state.is_file():
+            paths.append(feature_state)
+        specs = sorted((target / "specs").glob("*/spec.md"))
+        paths.extend(specs or [target / "spec-seeds" / "001-first-vertical.md"])
+        return paths
+
+    def launch_digest(self, project_id: str) -> str:
+        target = self.project_path(project_id)
+        digest = hashlib.sha256()
+        for path in self._launch_artifact_paths(project_id):
             digest.update(path.relative_to(target).as_posix().encode())
             digest.update(b"\0")
             digest.update(path.read_bytes() if path.is_file() else b"<missing>")
@@ -465,22 +623,20 @@ class Workspace:
                 atomic_json(target / "project.json", project_data)
                 break
         self.runtime.event("project.launch_endorsed", actor, {"note": note}, project_id)
+        commit_exact(
+            target,
+            [path, target / "project.json"],
+            f"oneco({actor.lower()}): endorse launch {project_id}",
+        )
+        commit_exact(
+            self.root,
+            [self.portfolio_path],
+            f"oneco({actor.lower()}): update shaping state {project_id}",
+        )
         return path
 
     def _artifacts_complete(self, project_id: str) -> bool:
-        target = self.project_path(project_id)
-        for item in (
-            "BRIEF.md",
-            ".specify/memory/constitution.md",
-            "spec-seeds/001-first-vertical.md",
-        ):
-            path = target / item
-            if not path.is_file():
-                return False
-            text = path.read_text(encoding="utf-8")
-            if "TBD" in text or "DRAFT —" in text:
-                return False
-        return True
+        return not self._mandatory_launch_reasons(project_id)
 
     def set_state(self, project_id: str, state: ProjectState, *, actor: str) -> ProjectRecord:
         actor = actor.upper()
@@ -510,14 +666,25 @@ class Workspace:
         actor = actor.upper()
         if actor not in {"CEO", "CTO"}:
             raise AuthorizationError("only a canonical CEO or CTO can launch an Owner")
-        if not self._artifacts_complete(project_id):
-            raise ProjectError("launch packet is incomplete; Board override cannot bypass artifacts")
         digest = self.launch_digest(project_id)
         packet = self.runtime.launch_packet(project_id) or {}
         endorsed = (
             packet.get("ceo_endorsed_digest") == digest
             and packet.get("cto_endorsed_digest") == digest
         )
+        ready, reasons = self.readiness(project_id)
+        if not ready:
+            allowable = {
+                "missing CEO endorsement for current launch packet",
+                "missing CTO endorsement for current launch packet",
+            }
+            if board_override_turn_id and (len(reasons) != 1 or reasons[0] not in allowable):
+                raise ProjectError(
+                    "project is not ready; Board launch waiver cannot bypass artifacts: "
+                    + "; ".join(reasons)
+                )
+            if not board_override_turn_id:
+                raise ProjectError("project is not ready: " + "; ".join(reasons))
         if not endorsed and not board_override_turn_id:
             raise ProjectError("current launch packet requires CEO and CTO endorsement")
         portfolio = self.portfolio()
@@ -533,11 +700,42 @@ class Workspace:
             data["state"] = ProjectState.ACTIVE
             atomic_json(self.project_path(project_id) / "project.json", data)
             self.runtime.mark_launched(project_id, digest, board_override_turn_id)
+            policy = load_json(self.root / "operations" / "supervision-policy.json")
+            self.runtime.set_supervision_due(
+                project_id,
+                next_review_at=(
+                    datetime.now(UTC) + timedelta(minutes=int(policy["interval_minutes"]))
+                ).isoformat(),
+            )
             self.runtime.event(
                 "project.launched",
                 actor,
                 {"digest": digest, "override": board_override_turn_id},
                 project_id,
+            )
+            launch_record = self.project_path(project_id) / "decisions" / (
+                f"launch-{digest[:16]}.json"
+            )
+            if not launch_record.exists():
+                atomic_json(
+                    launch_record,
+                    {
+                        "project_id": project_id,
+                        "launch_digest": digest,
+                        "launched_by": actor,
+                        "board_waiver_turn_id": board_override_turn_id,
+                        "created_at": datetime.now(UTC).isoformat(),
+                    },
+                )
+            commit_exact(
+                self.project_path(project_id),
+                [self.project_path(project_id) / "project.json", launch_record],
+                f"oneco({actor.lower()}): launch {project_id}",
+            )
+            commit_exact(
+                self.root,
+                [self.portfolio_path],
+                f"oneco({actor.lower()}): activate {project_id}",
             )
             return updated
         raise ProjectError(f"unknown project: {project_id}")

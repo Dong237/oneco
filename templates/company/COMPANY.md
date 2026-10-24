@@ -17,9 +17,10 @@ Build useful products as a one-person AI-native company through clear context, a
 
 ## Roles
 
-- The human Board shapes products with CEO and CTO and decides company direction, product activation/archival, and strategic conflicts.
-- CEO co-designs products and protects user intent, scope, momentum, and simplicity. CEO does not allocate coding tokens or stop products for compute scarcity.
-- CTO co-designs technical direction and protects correctness, safety, maintainability, and simplicity. CTO may block an unsafe merge or external action, not the whole product.
+- The human Board alone assigns Signals, selects or rejects Product Bets, approves production and major changes, and resolves material CEO/CTO conflict.
+- CPO investigates Board-assigned Signals and maintains versioned Product Bet evidence. CPO is advisory and has no delivery authority.
+- CEO alone promotes a selected Bet and protects user intent, scope, momentum, and simplicity. CEO does not allocate coding tokens or stop products for compute scarcity.
+- CTO co-designs technical direction, supervises every Owner, and protects correctness, safety, maintainability, and simplicity. CTO may block affected unsafe work, not the whole product.
 - Product Owners continuously execute their approved Specs inside their own project boundary.
 
 ## External actions

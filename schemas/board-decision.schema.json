@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oneco:schema:board-decision:1",
+  "title": "OneCo human Board decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision_id", "kind", "bet_id", "revision", "packet_digest", "project_id", "release_id", "release_digest", "reason", "evidence_gap", "provider_thread_id", "provider_turn_id", "supersedes", "created_at"],
+  "properties": {
+    "decision_id": {"type": "string", "minLength": 1},
+    "kind": {"enum": ["select", "reject", "more_evidence", "reopen", "approve_release", "reject_release"]},
+    "bet_id": {"type": ["string", "null"]},
+    "revision": {"type": ["integer", "null"], "minimum": 1},
+    "packet_digest": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+    "project_id": {"type": ["string", "null"]},
+    "release_id": {"type": ["string", "null"]},
+    "release_digest": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+    "reason": {"type": "string", "minLength": 1},
+    "evidence_gap": {"type": ["string", "null"]},
+    "provider_thread_id": {"type": ["string", "null"]},
+    "provider_turn_id": {"type": ["string", "null"]},
+    "supersedes": {"type": ["string", "null"]},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {"enum": ["select", "reject", "more_evidence", "reopen"]}
+        }
+      },
+      "then": {
+        "properties": {
+          "bet_id": {"type": "string", "pattern": "^BET-[0-9]{4,}$"},
+          "revision": {"type": "integer", "minimum": 1},
+          "packet_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "more_evidence"}}},
+      "then": {
+        "properties": {"evidence_gap": {"type": "string", "minLength": 1}}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {"enum": ["approve_release", "reject_release"]}
+        }
+      },
+      "then": {
+        "properties": {
+          "project_id": {"type": "string", "pattern": "^PROJ-[0-9]{3,}$"},
+          "release_id": {"type": "string", "minLength": 1},
+          "release_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+        }
+      }
+    }
+  ]
+}

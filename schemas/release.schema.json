@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oneco:schema:release:1",
+  "title": "OneCo release candidate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["release_id", "project_id", "product_commit", "release_digest", "acceptance_evidence", "acceptance_evidence_hashes", "state", "ceo_endorsed_digest", "cto_endorsed_digest", "board_decision_id", "result_evidence", "created_at", "updated_at"],
+  "properties": {
+    "release_id": {"type": "string", "pattern": "^rel_[a-f0-9]{32}$"},
+    "project_id": {"type": "string", "pattern": "^PROJ-[0-9]{3,}$"},
+    "product_commit": {"type": "string", "minLength": 1},
+    "release_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "acceptance_evidence": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "acceptance_evidence_hashes": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+      "additionalProperties": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+    },
+    "state": {"enum": ["candidate", "stale", "ready", "approved", "queued", "released", "rejected", "failed"]},
+    "ceo_endorsed_digest": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+    "cto_endorsed_digest": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+    "board_decision_id": {"type": ["string", "null"]},
+    "result_evidence": {"type": "array", "items": {"type": "string"}},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}
