@@ -1,6 +1,6 @@
 # OneCo v1.0.0 release QA
 
-Date: 2026-09-29  
+Date: 2026-09-29
 Verdict: **PASS as a local v1.0.0 release candidate on Python 3.11**
 
 This release was exercised from source, from a built wheel, and through the installed host command. Destructive, concurrency, and recovery work used disposable companies. the existing company workspace and unrelated Ghostty windows, Spaces, agents, processes, and tmux sessions were not touched.

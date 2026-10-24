@@ -1,6 +1,6 @@
 # OneCo v1.0.0 code-review closeout
 
-Date: 2026-09-29  
+Date: 2026-09-29
 Review result: **38 confirmed findings fixed; all dedicated regressions pass**
 
 Five independent review groups examined messaging/runtime, lifecycle/recovery, process/session orchestration, CLI/MCP/plugin integration, and Cockpit/contracts. A final cross-boundary review then covered packaging, native Python compatibility, exact macOS Space placement, and SQLite-loss behavior. Severity at confirmation was 1 P0, 32 P1, and 5 P2.
@@ -47,4 +47,3 @@ Five independent review groups examined messaging/runtime, lifecycle/recovery, p
 | 38 | P1 | After SQLite loss, the legacy readiness fallback treated stale digest-bound endorsements as current | Legacy booleans remain compatible, while v1 endorsement objects must match the current launch digest |
 
 No confirmed finding was waived, hidden, or converted into a documentation-only exception. Durable regressions are distributed across `tests/test_release_hardening.py`, `tests/test_release_pressure.py`, `tests/test_v1_release_qa.py`, `tests/test_live_qa_regressions.py`, `tests/test_refresh_regressions.py`, `tests/test_records.py`, `tests/test_bridge_boundaries.py`, `tests/test_cli.py`, and `tests/test_package_metadata.py`.
-

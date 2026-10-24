@@ -675,4 +675,3 @@ def test_cockpit_signal_has_board_provenance_without_external_uri(tmp_path: Path
     )
 
     assert sources[0]["uri"].startswith("board://")
-
